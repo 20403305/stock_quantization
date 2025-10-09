@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  trading-platform:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    environment:
+      - PYTHONPATH=/app
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    
+  # 可选：添加数据库服务
+  # postgres:
+  #   image: postgres:13
+  #   environment:
+  #     POSTGRES_DB: trading
+  #     POSTGRES_USER: trader
+  #     POSTGRES_PASSWORD: password123
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+# volumes:
+#   postgres_data:

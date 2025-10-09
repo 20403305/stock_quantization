@@ -1,0 +1,179 @@
+"""
+数据管理器 - 统一管理各种数据源
+"""
+
+import pandas as pd
+import yfinance as yf
+from loguru import logger
+from typing import Optional, Dict, Any
+from config.settings import DATA_CONFIG, API_CONFIG
+
+class DataManager:
+    """数据管理器类"""
+    
+    def __init__(self):
+        self.providers = {
+            'yfinance': self._get_yfinance_data,
+            'tushare': self._get_tushare_data,
+            'akshare': self._get_akshare_data,
+        }
+        self.default_provider = DATA_CONFIG['default_provider']
+    
+    def get_stock_data(
+        self, 
+        symbol: str, 
+        start_date: str, 
+        end_date: str,
+        provider: Optional[str] = None
+    ) -> pd.DataFrame:
+        """
+        获取股票数据
+        
+        Args:
+            symbol: 股票代码
+            start_date: 开始日期
+            end_date: 结束日期  
+            provider: 数据提供商
+            
+        Returns:
+            包含OHLCV数据的DataFrame
+        """
+        provider = provider or self.default_provider
+        
+        if provider not in self.providers:
+            logger.error(f"不支持的数据提供商: {provider}")
+            return pd.DataFrame()
+        
+        try:
+            logger.info(f"从 {provider} 获取 {symbol} 数据")
+            data = self.providers[provider](symbol, start_date, end_date)
+            
+            if not data.empty:
+                data = self._standardize_data(data)
+                logger.info(f"成功获取 {len(data)} 条数据")
+            else:
+                logger.warning(f"未获取到 {symbol} 的数据")
+                
+            return data
+            
+        except Exception as e:
+            logger.error(f"获取数据失败: {e}")
+            return pd.DataFrame()
+    
+    def _get_yfinance_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """从Yahoo Finance获取数据"""
+        try:
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(start=start_date, end=end_date)
+            return data
+        except Exception as e:
+            logger.error(f"Yahoo Finance数据获取失败: {e}")
+            return pd.DataFrame()
+    
+    def _get_tushare_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """从Tushare获取数据"""
+        try:
+            import tushare as ts
+            if not API_CONFIG['tushare_token']:
+                logger.error("未配置Tushare Token")
+                return pd.DataFrame()
+            
+            ts.set_token(API_CONFIG['tushare_token'])
+            pro = ts.pro_api()
+            
+            # 转换日期格式
+            start_date = start_date.replace('-', '')
+            end_date = end_date.replace('-', '')
+            
+            data = pro.daily(ts_code=symbol, start_date=start_date, end_date=end_date)
+            
+            # 转换列名和格式
+            data = data.rename(columns={
+                'trade_date': 'Date',
+                'open': 'Open',
+                'high': 'High', 
+                'low': 'Low',
+                'close': 'Close',
+                'vol': 'Volume'
+            })
+            
+            data['Date'] = pd.to_datetime(data['Date'])
+            data.set_index('Date', inplace=True)
+            data.sort_index(inplace=True)
+            
+            return data
+            
+        except Exception as e:
+            logger.error(f"Tushare数据获取失败: {e}")
+            return pd.DataFrame()
+    
+    def _get_akshare_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """从AKShare获取数据"""
+        try:
+            import akshare as ak
+            
+            # AKShare的股票代码格式可能需要调整
+            data = ak.stock_zh_a_hist(symbol=symbol, start_date=start_date.replace('-', ''), 
+                                    end_date=end_date.replace('-', ''))
+            
+            if data.empty:
+                return pd.DataFrame()
+            
+            # 标准化列名
+            data = data.rename(columns={
+                '日期': 'Date',
+                '开盘': 'Open',
+                '最高': 'High',
+                '最低': 'Low', 
+                '收盘': 'Close',
+                '成交量': 'Volume'
+            })
+            
+            data['Date'] = pd.to_datetime(data['Date'])
+            data.set_index('Date', inplace=True)
+            data.sort_index(inplace=True)
+            
+            return data
+            
+        except Exception as e:
+            logger.error(f"AKShare数据获取失败: {e}")
+            return pd.DataFrame()
+    
+    def _standardize_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """标准化数据格式"""
+        # 确保必要的列存在
+        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        
+        for col in required_columns:
+            if col not in data.columns:
+                logger.warning(f"缺少列: {col}")
+        
+        # 确保数据类型正确
+        numeric_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        for col in numeric_columns:
+            if col in data.columns:
+                data[col] = pd.to_numeric(data[col], errors='coerce')
+        
+        # 删除包含NaN的行
+        data.dropna(inplace=True)
+        
+        return data
+    
+    def get_real_time_data(self, symbol: str) -> Dict[str, Any]:
+        """获取实时数据"""
+        try:
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+            
+            return {
+                'symbol': symbol,
+                'price': info.get('currentPrice', 0),
+                'change': info.get('regularMarketChange', 0),
+                'change_percent': info.get('regularMarketChangePercent', 0),
+                'volume': info.get('volume', 0),
+                'market_cap': info.get('marketCap', 0),
+            }
+            
+        except Exception as e:
+            logger.error(f"获取实时数据失败: {e}")
+            return {}
