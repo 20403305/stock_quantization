@@ -21,7 +21,20 @@ def run_web_app():
     """运行Web应用"""
     print("启动Web应用...")
     try:
-        subprocess.run([sys.executable, "-m", "streamlit", "run", "web_app/app.py"])
+        # 导入配置
+        sys.path.append(str(Path(__file__).parent))
+        from config.settings import WEB_CONFIG
+        
+        # 构建streamlit命令
+        cmd = [
+            sys.executable, "-m", "streamlit", "run", 
+            "web_app/app.py",
+            "--server.port", str(WEB_CONFIG['port']),
+            "--server.address", WEB_CONFIG['host']
+        ]
+        
+        print(f"🌐 启动地址: http://{WEB_CONFIG['host']}:{WEB_CONFIG['port']}")
+        subprocess.run(cmd)
     except KeyboardInterrupt:
         print("\n👋 Web应用已停止")
     except Exception as e:

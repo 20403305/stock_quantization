@@ -4,6 +4,10 @@
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# 加载.env文件
+load_dotenv()
 
 # 项目根目录
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -64,9 +68,9 @@ LOGGING_CONFIG = {
 
 # Web应用配置
 WEB_CONFIG = {
-    'host': '0.0.0.0',
-    'port': 8501,
-    'debug': True,
+    'host': os.getenv('WEB_HOST', '0.0.0.0'),
+    'port': int(os.getenv('WEB_PORT', '8501')),
+    'debug': os.getenv('WEB_DEBUG', 'True').lower() == 'true',
 }
 
 # API配置
