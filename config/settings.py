@@ -71,6 +71,7 @@ WEB_CONFIG = {
     'host': os.getenv('WEB_HOST', '0.0.0.0'),
     'port': int(os.getenv('WEB_PORT', '8501')),
     'debug': os.getenv('WEB_DEBUG', 'True').lower() == 'true',
+    'disable_websocket': os.getenv('DISABLE_WEBSOCKET', 'False').lower() == 'true',
 }
 
 # API配置

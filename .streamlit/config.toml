@@ -1,0 +1,26 @@
+[server]
+# 服务器配置
+headless = true
+enableCORS = true
+enableXsrfProtection = false
+enableWebsocketCompression = false
+
+# 文件上传配置
+maxUploadSize = 200
+
+[browser]
+# 浏览器配置
+gatherUsageStats = false
+showErrorDetails = true
+
+[theme]
+# 主题配置
+primaryColor = "#FF6B6B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#262730"
+
+[client]
+# 客户端配置
+showErrorDetails = true
+toolbarMode = "viewer"

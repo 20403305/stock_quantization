@@ -33,6 +33,15 @@ def run_web_app():
             "--server.address", WEB_CONFIG['host']
         ]
         
+        # 内网穿透模式配置
+        if WEB_CONFIG.get('disable_websocket', False):
+            cmd.extend([
+                "--server.enableWebsocketCompression", "false",
+                "--server.enableCORS", "true",
+                "--server.enableXsrfProtection", "false"
+            ])
+            print("🌐 内网穿透模式 (WebSocket已禁用)")
+        
         print(f"🌐 启动地址: http://{WEB_CONFIG['host']}:{WEB_CONFIG['port']}")
         subprocess.run(cmd)
     except KeyboardInterrupt:
