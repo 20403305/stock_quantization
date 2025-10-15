@@ -81,3 +81,13 @@ API_CONFIG = {
     'request_timeout': 30,
     'retry_times': 3,
 }
+
+# 模型配置
+MODEL_CONFIG = {
+    'default_model': os.getenv('DEFAULT_MODEL', 'deepseek-r1:1.5b'),
+    'api_endpoint': os.getenv('MODEL_API_ENDPOINT', 'http://192.168.101.31:13888/api'),
+    'api_key': os.getenv('MODEL_API_KEY', 'sk-8665ae17a16d4345b907ecde63d0b2ab'),
+    'max_tokens': int(os.getenv('MODEL_MAX_TOKENS', '4096')),
+    'temperature': float(os.getenv('MODEL_TEMPERATURE', '0.7')),
+    'timeout': int(os.getenv('MODEL_TIMEOUT', '60')),
+}

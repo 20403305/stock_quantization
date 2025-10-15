@@ -17,6 +17,7 @@ from src.strategy.ma_strategy import MAStrategy
 from src.strategy.rsi_strategy import RSIStrategy
 from src.strategy.macd_strategy import MACDStrategy
 from src.backtest.backtest_engine import BacktestEngine
+from src.analysis.stock_analyzer import StockAnalyzer
 
 # 页面配置
 st.set_page_config(
@@ -102,12 +103,20 @@ def main():
             strategy_params['slow_period'] = st.slider("慢线周期", 15, 40, 26)
             strategy_params['signal_period'] = st.slider("信号线周期", 5, 15, 9)
         
+        # 模型分析选项
+        st.subheader("🤖 AI模型分析")
+        enable_model_analysis = st.checkbox("启用AI模型分析", value=True)
+        
         # 运行按钮
-        run_backtest = st.button("🚀 运行回测", type="primary")
+        col1, col2 = st.columns(2)
+        with col1:
+            run_backtest = st.button("🚀 运行回测", type="primary")
+        with col2:
+            run_model_only = st.button("🧠 仅运行模型分析")
     
     # 主内容区域
-    if run_backtest:
-        with st.spinner("正在获取数据和运行回测..."):
+    if run_backtest or run_model_only:
+        with st.spinner("正在获取数据和运行分析..."):
             # 获取数据
             data = load_stock_data(symbol, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
             
@@ -115,15 +124,30 @@ def main():
                 st.error("❌ 无法获取数据，请检查股票代码或日期范围")
                 return
             
-            # 运行回测
-            results = run_strategy_backtest(data, strategy_name, **strategy_params)
+            # 运行模型分析
+            if enable_model_analysis or run_model_only:
+                try:
+                    analyzer = StockAnalyzer()
+                    model_results = analyzer.analyze_stock(symbol, data, start_date.strftime('%Y-%m-%d'))
+                    
+                    if model_results['model_analysis']['success']:
+                        st.success("✅ AI模型分析完成")
+                        display_model_analysis(model_results)
+                    else:
+                        st.error(f"❌ 模型分析失败: {model_results['model_analysis'].get('error', '未知错误')}")
+                except Exception as e:
+                    st.error(f"❌ 模型分析异常: {e}")
             
-            if not results:
-                st.error("❌ 回测运行失败")
-                return
-            
-            # 显示结果
-            display_results(data, results, symbol, strategy_name)
+            # 运行回测（如果不是仅运行模型分析）
+            if run_backtest and not run_model_only:
+                results = run_strategy_backtest(data, strategy_name, **strategy_params)
+                
+                if not results:
+                    st.error("❌ 回测运行失败")
+                    return
+                
+                # 显示结果
+                display_results(data, results, symbol, strategy_name)
     
     else:
         # 默认显示
@@ -297,6 +321,98 @@ def display_results(data, results, symbol, strategy_name):
         trades_display.columns = ['买入日期', '卖出日期', '买入价格', '卖出价格', '收益率', '持有天数']
         
         st.dataframe(trades_display, use_container_width=True)
+
+def display_model_analysis(model_results):
+    """显示模型分析结果"""
+    st.header("🤖 AI模型分析报告")
+    
+    analysis_data = model_results['model_analysis']
+    technical_data = model_results['technical_indicators']
+    
+    # 基本信息
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            label="股票代码",
+            value=model_results['stock_code']
+        )
+    
+    with col2:
+        st.metric(
+            label="分析日期",
+            value=model_results['analysis_date']
+        )
+    
+    with col3:
+        st.metric(
+            label="数据周期",
+            value=f"{model_results['data_period']['days']}天"
+        )
+    
+    # 技术指标概览
+    st.subheader("📊 技术指标概览")
+    
+    if technical_data:
+        price_data = technical_data['price']
+        momentum_data = technical_data['momentum']
+        volume_data = technical_data['volume']
+        risk_data = technical_data['risk']
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                label="当前价格",
+                value=f"{price_data['current']:.2f}",
+                delta=f"{price_data['change_pct']:.2%}"
+            )
+        
+        with col2:
+            st.metric(
+                label="RSI指标",
+                value=f"{momentum_data['rsi']:.1f}",
+                delta="超买" if momentum_data['rsi'] > 70 else "超卖" if momentum_data['rsi'] < 30 else "正常"
+            )
+        
+        with col3:
+            st.metric(
+                label="成交量比率",
+                value=f"{volume_data['ratio']:.2f}",
+                delta="放量" if volume_data['ratio'] > 1.2 else "缩量" if volume_data['ratio'] < 0.8 else "正常"
+            )
+        
+        with col4:
+            st.metric(
+                label="年化波动率",
+                value=f"{risk_data['volatility']:.2%}"
+            )
+    
+    # 详细分析报告
+    st.subheader("📋 详细分析报告")
+    
+    if analysis_data['success']:
+        st.markdown("#### 分析内容:")
+        st.write(analysis_data['analysis'])
+        
+        # 显示使用统计
+        if 'usage' in analysis_data:
+            usage = analysis_data['usage']
+            st.caption(f"模型使用统计: {usage.get('total_tokens', 0)} tokens")
+    
+    # 交易建议
+    st.subheader("💡 交易建议")
+    
+    if technical_data:
+        price = technical_data['price']
+        st.info(f"""
+        **关键价位分析:**
+        - 支撑位: {price['support']:.2f}
+        - 压力位: {price['resistance']:.2f}
+        - 当前价位: {price['current']:.2f}
+        
+        **建议操作:** 请结合AI分析报告和技术指标进行决策
+        """)
 
 if __name__ == "__main__":
     main()

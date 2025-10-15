@@ -12,6 +12,7 @@ from src.data_provider.data_manager import DataManager
 from src.strategy.ma_strategy import MAStrategy
 from src.backtest.backtest_engine import BacktestEngine
 from src.visualization.plotter import TradingPlotter
+from src.analysis.stock_analyzer import StockAnalyzer
 
 def setup_logging():
     """设置日志配置"""
@@ -68,6 +69,18 @@ def main():
         # 生成可视化图表
         plotter = TradingPlotter()
         plotter.plot_backtest_results(data, results)
+        
+        # 使用模型进行股票分析
+        logger.info("开始模型分析")
+        analyzer = StockAnalyzer()
+        analysis_result = analyzer.analyze_stock(symbol, data, start_date)
+        
+        # 输出分析结果
+        if analysis_result['model_analysis']['success']:
+            logger.info("模型分析完成")
+            logger.info(f"分析结果: {analysis_result['model_analysis']['analysis'][:200]}...")
+        else:
+            logger.warning(f"模型分析失败: {analysis_result['model_analysis'].get('error', '未知错误')}")
         
         logger.info("量化交易平台运行完成")
         
