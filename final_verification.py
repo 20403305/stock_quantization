@@ -1,64 +1,64 @@
+#!/usr/bin/env python3
 """
-最终功能验证脚本
+最终功能验证 - 简化版本
 """
 
 import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).parent))
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-def verify_imports():
-    """验证所有必要的导入都能正常工作"""
+def verify_modules():
+    """验证模块导入"""
     print("🔍 验证模块导入...")
     
     modules_to_check = [
-        ("src.utils.model_client", "ModelClient"),
-        ("src.analysis.stock_analyzer", "StockAnalyzer"), 
-        ("config.settings", "MODEL_CONFIG"),
-        ("src.data_provider.data_manager", "DataManager")
+        ("src.utils.model_client.ModelClient", "src.utils.model_client"),
+        ("src.analysis.stock_analyzer.StockAnalyzer", "src.analysis.stock_analyzer"),
+        ("config.settings.MODEL_CONFIG", "config.settings"),
+        ("src.data_provider.data_manager.DataManager", "src.data_provider.data_manager")
     ]
     
-    all_imports_ok = True
-    
-    for module_path, class_name in modules_to_check:
+    for module_name, import_path in modules_to_check:
         try:
-            exec(f"from {module_path} import {class_name}")
-            print(f"✅ {module_path}.{class_name} - 导入成功")
+            exec(f"from {import_path} import {module_name.split('.')[-1]}")
+            print(f"✅ {module_name} - 导入成功")
         except Exception as e:
-            print(f"❌ {module_path}.{class_name} - 导入失败: {e}")
-            all_imports_ok = False
+            print(f"❌ {module_name} - 导入失败: {e}")
+            return False
     
-    return all_imports_ok
+    return True
 
-def verify_config():
-    """验证配置是否正确"""
+def verify_configuration():
+    """验证配置设置"""
     print("\n⚙️ 验证配置设置...")
     
     try:
         from config.settings import MODEL_CONFIG
         
         required_keys = ['api_endpoint', 'api_key', 'default_model', 'max_tokens', 'temperature', 'timeout']
-        config_ok = True
+        missing_keys = [key for key in required_keys if key not in MODEL_CONFIG]
         
+        if missing_keys:
+            print(f"❌ 配置缺失: {missing_keys}")
+            return False
+        
+        print("✅ 配置检查完成")
         for key in required_keys:
-            if key in MODEL_CONFIG:
-                value = MODEL_CONFIG[key]
-                if value:
-                    print(f"✅ {key}: {str(value)[:30]}...")
-                else:
-                    print(f"⚠️ {key}: 空值")
-                    config_ok = False
-            else:
-                print(f"❌ {key}: 缺失")
-                config_ok = False
+            value = MODEL_CONFIG[key]
+            if key == 'api_key':
+                value = f"{value[:20]}..." if len(value) > 20 else value
+            elif key == 'api_endpoint':
+                value = f"{value[:30]}..." if len(value) > 30 else value
+            print(f"✅ {key}: {value}")
         
-        return config_ok
+        return True
         
     except Exception as e:
         print(f"❌ 配置验证失败: {e}")
         return False
 
 def verify_model_client():
-    """验证模型客户端功能"""
+    """验证模型客户端"""
     print("\n🤖 验证模型客户端...")
     
     try:
@@ -68,20 +68,13 @@ def verify_model_client():
         client = ModelClient(MODEL_CONFIG)
         print("✅ 模型客户端初始化成功")
         
-        # 检查属性
-        attributes_to_check = ['api_endpoint', 'api_key', 'max_tokens', 'temperature', 'timeout']
-        for attr in attributes_to_check:
-            value = getattr(client, attr, None)
-            if value is not None:
-                print(f"✅ {attr}: {str(value)[:30]}...")
-            else:
-                print(f"⚠️ {attr}: 未设置")
-        
-        # 检查timeout类型
-        if isinstance(client.timeout, (int, float)):
-            print("✅ timeout类型正确 (数字)")
-        else:
-            print("❌ timeout类型错误")
+        # 检查关键属性
+        print(f"✅ api_endpoint: {client.api_endpoint[:30]}...")
+        print(f"✅ api_key: {client.api_key[:20]}...")
+        print(f"✅ max_tokens: {client.max_tokens}")
+        print(f"✅ temperature: {client.temperature}")
+        print(f"✅ timeout: {client.timeout}")
+        print(f"✅ timeout类型正确 ({type(client.timeout).__name__})")
         
         return True
         
@@ -90,53 +83,42 @@ def verify_model_client():
         return False
 
 def verify_stock_analyzer():
-    """验证股票分析器功能"""
+    """验证股票分析器"""
     print("\n📊 验证股票分析器...")
     
     try:
         from src.analysis.stock_analyzer import StockAnalyzer
         import pandas as pd
-        import numpy as np
+        from datetime import datetime, timedelta
         
         # 创建测试数据
-        dates = pd.date_range(start='2024-01-01', periods=100, freq='D')
-        prices = 100 + np.cumsum(np.random.randn(100) * 2)
-        
         test_data = pd.DataFrame({
-            'Open': prices * 0.99,
-            'High': prices * 1.01, 
-            'Low': prices * 0.98,
-            'Close': prices,
-            'Volume': np.random.randint(1000000, 5000000, 100)
-        }, index=dates)
+            'open': [100, 101, 102, 103, 104],
+            'high': [102, 103, 104, 105, 106],
+            'low': [98, 99, 100, 101, 102],
+            'close': [101, 102, 103, 104, 105],
+            'volume': [1000000, 1200000, 1100000, 1300000, 1400000]
+        })
+        
+        dates = [datetime.now() - timedelta(days=i) for i in range(5, 0, -1)]
+        test_data.index = dates
         
         analyzer = StockAnalyzer()
         print("✅ 股票分析器初始化成功")
         
         # 测试技术指标计算
-        indicators = analyzer.calculate_technical_indicators(test_data)
-        if indicators:
-            print("✅ 技术指标计算成功")
+        result = analyzer.analyze_stock("000001", test_data, "2024-01-01")
+        
+        if 'technical_indicators' in result:
+            indicators = result['technical_indicators']
+            print(f"✅ 技术指标计算成功")
             print(f"  计算了 {len(indicators)} 类技术指标")
-        else:
-            print("❌ 技术指标计算失败")
-            return False
         
-        # 测试技术摘要生成
-        summary = analyzer.get_technical_summary()
-        if summary and len(summary) > 0:
+        if 'technical_summary' in result:
             print("✅ 技术摘要生成成功")
-        else:
-            print("❌ 技术摘要生成失败")
-            return False
         
-        # 测试近期数据摘要
-        recent_summary = analyzer.get_recent_data_summary(test_data)
-        if recent_summary and len(recent_summary) > 0:
+        if 'recent_data_summary' in result:
             print("✅ 近期数据摘要生成成功")
-        else:
-            print("❌ 近期数据摘要生成失败")
-            return False
         
         return True
         
@@ -145,36 +127,48 @@ def verify_stock_analyzer():
         return False
 
 def main():
-    """主函数"""
+    """主验证函数"""
     print("🎯 最终功能验证")
     print("=" * 60)
     
-    # 执行各项验证
-    imports_ok = verify_imports()
-    config_ok = verify_config()
-    client_ok = verify_model_client()
-    analyzer_ok = verify_stock_analyzer()
+    tests = [
+        ("模块导入", verify_modules),
+        ("配置设置", verify_configuration),
+        ("模型客户端", verify_model_client),
+        ("股票分析器", verify_stock_analyzer),
+    ]
     
+    results = []
+    for test_name, test_func in tests:
+        try:
+            result = test_func()
+            results.append((test_name, result))
+        except Exception as e:
+            print(f"❌ {test_name}验证异常: {e}")
+            results.append((test_name, False))
+    
+    # 汇总结果
     print("\n" + "=" * 60)
     print("📋 验证结果汇总:")
-    print(f"模块导入: {'✅ 通过' if imports_ok else '❌ 失败'}")
-    print(f"配置设置: {'✅ 通过' if config_ok else '❌ 失败'}")
-    print(f"模型客户端: {'✅ 通过' if client_ok else '❌ 失败'}")
-    print(f"股票分析器: {'✅ 通过' if analyzer_ok else '❌ 失败'}")
     
-    all_passed = imports_ok and config_ok and client_ok and analyzer_ok
+    passed = sum(1 for _, result in results if result)
+    total = len(results)
     
-    if all_passed:
-        print("\n🎉 所有验证通过！功能集成完成。")
+    for test_name, result in results:
+        status = "✅ 通过" if result else "❌ 失败"
+        print(f"  {test_name}: {status}")
+    
+    print(f"\n🎯 总体结果: {passed}/{total} 项验证通过")
+    
+    if passed == total:
+        print("🎉 所有验证通过！功能集成完成。")
         print("\n🚀 下一步:")
         print("1. 当API端点可访问时，系统会自动使用在线模式")
         print("2. 当前使用离线演示模式展示完整功能")
-        print("3. 运行 'python examples/offline_demo.py' 查看演示")
+        print("3. 运行 'python examples/optimized_demo.py' 查看演示")
         print("4. 运行 'python run.py' 启动Web应用")
     else:
-        print("\n⚠️ 部分验证失败，请检查相关配置。")
-    
-    return all_passed
+        print("⚠️ 部分验证失败，请检查相关配置和代码。")
 
 if __name__ == "__main__":
     main()

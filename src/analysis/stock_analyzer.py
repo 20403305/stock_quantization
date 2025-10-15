@@ -151,39 +151,62 @@ class StockAnalyzer:
         return summary
     
     def analyze_stock(self, stock_code: str, data: pd.DataFrame, 
-                     start_date: str) -> Dict[str, Any]:
+                     start_date: str, force_refresh: bool = False) -> Dict[str, Any]:
         """综合分析股票"""
         logger.info(f"开始分析股票 {stock_code}")
         
-        # 计算技术指标
+        # 计算技术指标（立即返回）
         technical_indicators = self.calculate_technical_indicators(data)
         technical_summary = self.get_technical_summary()
         recent_data_summary = self.get_recent_data_summary(data)
         report_data = self.generate_report_data()
         
-        # 使用模型进行深度分析
-        model_analysis = analyze_stock_with_model(
-            stock_code=stock_code,
-            start_date=start_date,
-            technical_summary=technical_summary,
-            recent_data=recent_data_summary,
-            report_data=report_data
-        )
+        # 处理日期格式
+        start_date_str = data.index[0].strftime('%Y-%m-%d') if hasattr(data.index[0], 'strftime') else str(data.index[0])
+        end_date_str = data.index[-1].strftime('%Y-%m-%d') if hasattr(data.index[-1], 'strftime') else str(data.index[-1])
         
-        result = {
+        # 先返回技术指标结果
+        immediate_result = {
             'stock_code': stock_code,
             'analysis_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'technical_indicators': technical_indicators,
-            'model_analysis': model_analysis,
+            'technical_summary': technical_summary,
+            'recent_data_summary': recent_data_summary,
+            'report_data': report_data,
             'data_period': {
-                'start': data.index[0].strftime('%Y-%m-%d'),
-                'end': data.index[-1].strftime('%Y-%m-%d'),
+                'start': start_date_str,
+                'end': end_date_str,
                 'days': len(data)
-            }
+            },
+            'model_analysis_ready': False,
+            'model_analysis': None
         }
         
+        # 异步进行模型分析（如果不需要强制刷新且技术指标相同，可能使用缓存）
+        try:
+            model_analysis = analyze_stock_with_model(
+                stock_code=stock_code,
+                start_date=start_date,
+                technical_summary=technical_summary,
+                recent_data=recent_data_summary,
+                report_data=report_data,
+                force_refresh=force_refresh
+            )
+            
+            immediate_result['model_analysis'] = model_analysis
+            immediate_result['model_analysis_ready'] = True
+            
+        except Exception as e:
+            logger.warning(f"模型分析过程中出错: {e}")
+            immediate_result['model_analysis'] = {
+                'success': False,
+                'error': str(e),
+                'is_demo': True
+            }
+            immediate_result['model_analysis_ready'] = True
+        
         logger.info(f"股票 {stock_code} 分析完成")
-        return result
+        return immediate_result
     
     def generate_report_data(self) -> str:
         """生成报告数据"""
