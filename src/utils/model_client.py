@@ -139,32 +139,12 @@ class ModelClient:
                 cached_result['cached'] = True
                 return cached_result
         
-        # 异步测试连接，不阻塞分析过程
-        import threading
+        # 先测试连接，根据结果决定使用AI分析还是演示模式
+        logger.info("测试模型连接状态...")
+        connection_ok = self.test_connection()
         
-        def _async_test():
-            try:
-                if self.test_connection():
-                    logger.info("模型连接测试成功，下次请求将使用AI分析")
-                else:
-                    logger.warning("模型连接失败，将使用演示模式")
-            except Exception as e:
-                logger.debug(f"连接测试异常: {e}")
-        
-        # 启动异步连接测试
-        test_thread = threading.Thread(target=_async_test)
-        test_thread.daemon = True
-        test_thread.start()
-        
-        # 立即返回技术指标，不等待连接测试
-        logger.info("立即返回技术指标，异步测试模型连接")
-        result = self.get_demo_analysis(stock_code, technical_summary)
-        # 演示模式结果也缓存
-        self.cache.set(cache_key, result)
-        return result
-        
-        # 异步AI分析（如果连接成功）
-        def _async_ai_analysis():
+        if connection_ok:
+            logger.info("模型连接正常，使用AI分析")
             try:
                 prompt = f"""
 分析 A 股 {stock_code} 股票：
@@ -204,7 +184,7 @@ class ModelClient:
                 response = self.chat_completion(messages)
                 analysis_result = response['choices'][0]['message']['content']
                 
-                ai_result = {
+                result = {
                     'success': True,
                     'stock_code': stock_code,
                     'analysis': analysis_result,
@@ -215,16 +195,22 @@ class ModelClient:
                 }
                 
                 # 缓存AI分析结果
-                self.cache.set(cache_key, ai_result)
-                logger.info("AI分析完成并已缓存")
+                self.cache.set(cache_key, result)
+                logger.info("AI分析完成")
+                return result
                 
             except Exception as e:
-                logger.warning(f"AI分析失败: {e}")
-        
-        # 启动异步AI分析
-        ai_thread = threading.Thread(target=_async_ai_analysis)
-        ai_thread.daemon = True
-        ai_thread.start()
+                logger.warning(f"AI分析失败，回退到演示模式: {e}")
+                # 回退到演示模式
+                result = self.get_demo_analysis(stock_code, technical_summary)
+                self.cache.set(cache_key, result)
+                return result
+        else:
+            logger.info("模型连接失败，使用演示模式")
+            result = self.get_demo_analysis(stock_code, technical_summary)
+            # 演示模式结果也缓存
+            self.cache.set(cache_key, result)
+            return result
     
     def test_connection(self) -> bool:
         """测试模型连接（快速测试）"""
@@ -276,14 +262,12 @@ class ModelClient:
             if '压力位:' in technical_summary:
                 resistance_parts = technical_summary.split('压力位:')
                 if len(resistance_parts) > 1:
-                    resistance_level = resistance_parts[1].split('\
-')[0].strip()
+                    resistance_level = resistance_parts[1].split('\n')[0].strip()
             
             if '成交量比率:' in technical_summary:
                 volume_parts = technical_summary.split('成交量比率:')
                 if len(volume_parts) > 1:
-                    volume_ratio = volume_parts[1].split('\
-')[0].strip()
+                    volume_ratio = volume_parts[1].split('\n')[0].strip()
         
         except Exception as e:
             logger.warning(f"解析技术摘要失败，使用默认值: {e}")
