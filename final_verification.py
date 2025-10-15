@@ -91,13 +91,13 @@ def verify_stock_analyzer():
         import pandas as pd
         from datetime import datetime, timedelta
         
-        # 创建测试数据
+        # 创建测试数据（使用大写列名）
         test_data = pd.DataFrame({
-            'open': [100, 101, 102, 103, 104],
-            'high': [102, 103, 104, 105, 106],
-            'low': [98, 99, 100, 101, 102],
-            'close': [101, 102, 103, 104, 105],
-            'volume': [1000000, 1200000, 1100000, 1300000, 1400000]
+            'Open': [100, 101, 102, 103, 104],
+            'High': [102, 103, 104, 105, 106],
+            'Low': [98, 99, 100, 101, 102],
+            'Close': [101, 102, 103, 104, 105],
+            'Volume': [1000000, 1200000, 1100000, 1300000, 1400000]
         })
         
         dates = [datetime.now() - timedelta(days=i) for i in range(5, 0, -1)]
