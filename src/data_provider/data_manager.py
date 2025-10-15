@@ -24,7 +24,8 @@ class DataManager:
         symbol: str, 
         start_date: str, 
         end_date: str,
-        provider: Optional[str] = None
+        provider: Optional[str] = None,
+        market_type: Optional[str] = None
     ) -> pd.DataFrame:
         """
         获取股票数据
@@ -34,6 +35,7 @@ class DataManager:
             start_date: 开始日期
             end_date: 结束日期  
             provider: 数据提供商
+            market_type: 市场类型 ('SH'=沪指, 'SZ'=深指, None=自动识别)
             
         Returns:
             包含OHLCV数据的DataFrame
@@ -44,21 +46,60 @@ class DataManager:
             logger.error(f"不支持的数据提供商: {provider}")
             return pd.DataFrame()
         
+        # 处理股票代码后缀
+        symbol_with_suffix = self._format_symbol(symbol, market_type)
+        
         try:
-            logger.info(f"从 {provider} 获取 {symbol} 数据")
-            data = self.providers[provider](symbol, start_date, end_date)
+            logger.info(f"从 {provider} 获取 {symbol_with_suffix} 数据")
+            data = self.providers[provider](symbol_with_suffix, start_date, end_date)
             
             if not data.empty:
                 data = self._standardize_data(data)
                 logger.info(f"成功获取 {len(data)} 条数据")
             else:
-                logger.warning(f"未获取到 {symbol} 的数据")
+                logger.warning(f"未获取到 {symbol_with_suffix} 的数据")
                 
             return data
             
         except Exception as e:
             logger.error(f"获取数据失败: {e}")
             return pd.DataFrame()
+    
+    def _format_symbol(self, symbol: str, market_type: Optional[str] = None) -> str:
+        """
+        格式化股票代码，添加市场后缀
+        
+        Args:
+            symbol: 原始股票代码
+            market_type: 市场类型 ('SH'=沪指, 'SZ'=深指, None=自动识别)
+            
+        Returns:
+            格式化后的股票代码
+        """
+        # 如果已经包含后缀，直接返回
+        if '.' in symbol:
+            return symbol
+        
+        # 如果指定了市场类型
+        if market_type:
+            if market_type.upper() == 'SH':
+                return f"{symbol}.SH"
+            elif market_type.upper() == 'SZ':
+                return f"{symbol}.SZ"
+            else:
+                logger.warning(f"未知的市场类型: {market_type}, 使用自动识别")
+        
+        # 自动识别市场类型
+        if symbol.startswith('6'):
+            return f"{symbol}.SH"  # 沪市
+        elif symbol.startswith('0') or symbol.startswith('3'):
+            return f"{symbol}.SZ"  # 深市
+        elif symbol.startswith('4') or symbol.startswith('8'):
+            return f"{symbol}.BJ"  # 北交所
+        else:
+            # 默认使用深市
+            logger.warning(f"无法识别股票代码 {symbol} 的市场类型，默认使用深市")
+            return f"{symbol}.SZ"
     
     def _get_yfinance_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
         """从Yahoo Finance获取数据"""

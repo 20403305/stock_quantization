@@ -6,7 +6,7 @@ import requests
 import json
 import time
 import hashlib
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 from loguru import logger
 from config.settings import MODEL_CONFIG
 
@@ -55,22 +55,34 @@ class ModelClient:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """初始化模型客户端"""
         self.config = config or MODEL_CONFIG
-        self.api_endpoint = self.config['api_endpoint']
-        self.api_key = self.config['api_key']
-        self.max_tokens = self.config['max_tokens']
-        self.temperature = self.config['temperature']
+        self.api_endpoint: str = str(self.config['api_endpoint'])
+        self.api_key: str = str(self.config['api_key'])
+        self.max_tokens: int = int(self.config['max_tokens'])
+        self.temperature: float = float(self.config['temperature'])
         
         # 处理timeout参数，确保是float类型
-        timeout_config = self.config['timeout']
+        timeout_config: Union[str, int, float] = self.config['timeout']
         if isinstance(timeout_config, (int, float)):
-            self.timeout = float(timeout_config)
+            self.timeout: float = float(timeout_config)
         elif isinstance(timeout_config, str):
             try:
-                self.timeout = float(timeout_config)
+                self.timeout: float = float(timeout_config)
             except ValueError:
-                self.timeout = 60.0  # 默认值
+                self.timeout: float = 120.0  # 默认2分钟
         else:
-            self.timeout = 60.0  # 默认值
+            self.timeout: float = 120.0  # 默认2分钟
+        
+        # 处理connection_timeout参数
+        connection_timeout_config: Union[str, int, float] = self.config.get('connection_timeout', 3.0)
+        if isinstance(connection_timeout_config, (int, float)):
+            self.connection_timeout: float = float(connection_timeout_config)
+        elif isinstance(connection_timeout_config, str):
+            try:
+                self.connection_timeout: float = float(connection_timeout_config)
+            except ValueError:
+                self.connection_timeout: float = 3.0  # 默认3秒
+        else:
+            self.connection_timeout: float = 3.0  # 默认3秒
         
         # 设置请求头
         self.headers = {
@@ -81,7 +93,7 @@ class ModelClient:
         # 初始化缓存
         self.cache = AnalysisCache()
         
-        logger.info(f"模型客户端初始化完成 - 端点: {self.api_endpoint}")
+        logger.info(f"模型客户端初始化完成 - 端点: {self.api_endpoint}, 超时: {self.timeout}秒, 连接超时: {self.connection_timeout}秒")
     
     def chat_completion(self, messages: List[Dict[str, str]], 
                        model: Optional[str] = None,
@@ -220,14 +232,14 @@ class ModelClient:
                 logger.warning("API端点配置错误，不是字符串类型")
                 return False
             
-            # 使用更短的超时时间进行简单连接测试
+            # 使用配置的超时时间进行连接测试
             import requests
             
             # 测试基础连接（不调用完整API）
             test_url = self.api_endpoint.replace('/api', '')
             response = requests.get(
                 f"{test_url}/health",
-                timeout=3.0,  # 3秒超时
+                timeout=self.connection_timeout,
                 headers={"Authorization": f"Bearer {self.api_key}"}
             )
             
@@ -239,7 +251,7 @@ class ModelClient:
                 return False
                 
         except requests.exceptions.ConnectTimeout:
-            logger.warning("模型连接测试超时，API端点可能无法访问")
+            logger.warning(f"模型连接测试超时 ({self.connection_timeout}秒)，API端点可能无法访问")
             return False
         except Exception as e:
             logger.debug(f"模型连接测试失败: {e}")

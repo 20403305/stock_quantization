@@ -89,5 +89,6 @@ MODEL_CONFIG = {
     'api_key': os.getenv('MODEL_API_KEY', 'sk-8665ae17a16d4345b907ecde63d0b2ab'),
     'max_tokens': int(os.getenv('MODEL_MAX_TOKENS', '4096')),
     'temperature': float(os.getenv('MODEL_TEMPERATURE', '0.7')),
-    'timeout': int(os.getenv('MODEL_TIMEOUT', '60')),
+    'timeout': int(os.getenv('MODEL_TIMEOUT', '120')),  # 默认2分钟超时
+    'connection_timeout': float(os.getenv('MODEL_CONNECTION_TIMEOUT', '3.0')),  # 连接测试超时
 }
