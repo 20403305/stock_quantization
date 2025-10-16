@@ -276,22 +276,10 @@ class ModelClient:
                     logger.warning(f"深度求索平台连接测试失败，状态码: {response.status_code}")
                     return False
             else:
-                # 其他平台使用基础连接测试
-                test_url = self.api_endpoint.replace('/api', '')
-                headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-                
-                response = requests.get(
-                    f"{test_url}/health",
-                    timeout=self.connection_timeout,
-                    headers=headers
-                )
-                
-                if response.status_code == 200:
-                    logger.info("模型连接测试成功")
-                    return True
-                else:
-                    logger.warning(f"模型连接测试失败，状态码: {response.status_code}")
-                    return False
+                # 对于第三方API平台，直接返回True，避免不必要的连接测试
+                # 很多第三方API没有/health端点，会在实际调用时进行验证
+                logger.info(f"{self.platform_name}平台跳过连接测试，将在实际调用时验证")
+                return True
                 
         except requests.exceptions.ConnectTimeout:
             logger.warning(f"模型连接测试超时 ({self.connection_timeout}秒)，API端点可能无法访问")
