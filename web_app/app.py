@@ -326,6 +326,8 @@ def main():
                         st.success("✅ AI模型分析完成")
                         # 仅在仅运行模型分析时显示模型分析结果
                         if run_model_only:
+                            # 添加股票名称到模型结果中
+                            model_results['stock_name'] = stock_name
                             display_model_analysis(model_results)
                     else:
                         st.error(f"❌ 模型分析失败: {model_results['model_analysis'].get('error', '未知错误')}")
@@ -347,6 +349,8 @@ def main():
                 if enable_model_analysis:
                     try:
                         if 'model_results' in locals() and model_results:
+                            # 添加股票名称到模型结果中
+                            model_results['stock_name'] = stock_name
                             display_model_analysis(model_results)
                     except NameError:
                         pass
@@ -599,18 +603,12 @@ def display_model_analysis(model_results):
         )
     
     with col2:
-        # 尝试获取股票名称
-        try:
-            stock_name = get_stock_name(model_results['stock_code'], "tushare")
-            st.metric(
-                label="股票名称",
-                value=stock_name
-            )
-        except:
-            st.metric(
-                label="分析日期",
-                value=model_results['analysis_date']
-            )
+        # 使用股票列表中的名称字段
+        stock_name = model_results.get('stock_name', model_results['stock_code'])
+        st.metric(
+            label="股票名称",
+            value=stock_name
+        )
     
     with col3:
         st.metric(
