@@ -61,6 +61,7 @@ class ModelClient:
         platforms_config = self.config.get('platforms', {})
         platform_config = platforms_config.get(self.platform, {})
         
+        # 检查平台是否启用（允许API密钥为空，因为可能是演示模式）
         if not platform_config or not platform_config.get('enabled', False):
             # 如果平台不可用，回退到默认平台
             self.platform = str(self.config.get('default_platform', 'local'))
@@ -248,20 +249,49 @@ class ModelClient:
             # 使用配置的超时时间进行连接测试
             import requests
             
-            # 测试基础连接（不调用完整API）
-            test_url = self.api_endpoint.replace('/api', '')
-            response = requests.get(
-                f"{test_url}/health",
-                timeout=self.connection_timeout,
-                headers={"Authorization": f"Bearer {self.api_key}"}
-            )
-            
-            if response.status_code == 200:
-                logger.info("模型连接测试成功")
-                return True
+            # 对于深度求索平台，使用不同的测试方式
+            if self.platform == 'deepseek':
+                # 深度求索平台需要API密钥，如果密钥为空则无法连接
+                if not self.api_key:
+                    logger.warning("深度求索平台API密钥为空，无法连接")
+                    return False
+                
+                # 测试深度求索API连接
+                headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {self.api_key}'
+                }
+                
+                # 使用模型列表API进行测试
+                response = requests.get(
+                    f"{self.api_endpoint}/models",
+                    headers=headers,
+                    timeout=self.connection_timeout
+                )
+                
+                if response.status_code == 200:
+                    logger.info("深度求索平台连接测试成功")
+                    return True
+                else:
+                    logger.warning(f"深度求索平台连接测试失败，状态码: {response.status_code}")
+                    return False
             else:
-                logger.warning(f"模型连接测试失败，状态码: {response.status_code}")
-                return False
+                # 其他平台使用基础连接测试
+                test_url = self.api_endpoint.replace('/api', '')
+                headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+                
+                response = requests.get(
+                    f"{test_url}/health",
+                    timeout=self.connection_timeout,
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    logger.info("模型连接测试成功")
+                    return True
+                else:
+                    logger.warning(f"模型连接测试失败，状态码: {response.status_code}")
+                    return False
                 
         except requests.exceptions.ConnectTimeout:
             logger.warning(f"模型连接测试超时 ({self.connection_timeout}秒)，API端点可能无法访问")
@@ -349,10 +379,18 @@ _model_client = None
 def get_model_client(platform: str = None, model_name: str = None) -> ModelClient:
     """获取模型客户端单例"""
     global _model_client
-    if _model_client is None or (platform and _model_client.platform != platform) or (model_name and _model_client.default_model != model_name):
+    if (_model_client is None or 
+        (platform and _model_client.platform != platform) or 
+        (model_name and _model_client.default_model != model_name)):
+        
         _model_client = ModelClient(platform=platform)
+        
+        # 如果指定了模型名称，更新默认模型
         if model_name:
             _model_client.default_model = model_name
+            
+        logger.info(f"创建新的模型客户端 - 平台: {_model_client.platform}, 模型: {_model_client.default_model}")
+    
     return _model_client
 
 def analyze_stock_with_model(stock_code: str, 

@@ -97,7 +97,7 @@ MODEL_CONFIG = {
             'api_endpoint': os.getenv('DEEPSEEK_API_ENDPOINT', 'https://api.deepseek.com/v1'),
             'api_key': os.getenv('DEEPSEEK_API_KEY', ''),
             'default_model': os.getenv('DEEPSEEK_DEFAULT_MODEL', 'deepseek-chat'),
-            'enabled': os.getenv('DEEPSEEK_ENABLED', 'False').lower() == 'true'
+            'enabled': os.getenv('DEEPSEEK_ENABLED', 'True').lower() == 'true'
         }
     },
     'default_platform': os.getenv('DEFAULT_MODEL_PLATFORM', 'local'),

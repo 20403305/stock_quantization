@@ -438,25 +438,6 @@ def display_model_analysis(model_results):
             value=platform_name
         )
     
-    with col2:
-        st.metric(
-            label="分析日期",
-            value=model_results['analysis_date']
-        )
-    
-    with col3:
-        st.metric(
-            label="数据周期",
-            value=f"{model_results['data_period']['days']}天"
-        )
-    
-    with col4:
-        platform_name = "本地模型服务" if model_results.get('model_platform') == 'local' else "深度求索平台" if model_results.get('model_platform') == 'deepseek' else "默认平台"
-        st.metric(
-            label="模型平台",
-            value=platform_name
-        )
-    
     # 技术指标概览
     st.subheader("📊 技术指标概览")
     
