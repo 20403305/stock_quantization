@@ -29,10 +29,16 @@ st.set_page_config(
 
 # 缓存数据获取函数
 @st.cache_data
-def load_stock_data(symbol, start_date, end_date):
+def load_stock_data(symbol, start_date, end_date, data_provider):
     """加载股票数据"""
     data_manager = DataManager()
-    return data_manager.get_stock_data(symbol, start_date, end_date)
+    return data_manager.get_stock_data(symbol, start_date, end_date, provider=data_provider)
+
+@st.cache_data
+def get_stock_name(symbol, data_provider):
+    """获取股票名称"""
+    data_manager = DataManager()
+    return data_manager.get_stock_name(symbol, provider=data_provider)
 
 @st.cache_data
 def run_strategy_backtest(data, strategy_name, **params):
@@ -58,9 +64,26 @@ def main():
     with st.sidebar:
         st.header("📊 参数设置")
         
+        # 数据源选择
+        st.subheader("数据源选择")
+        data_provider = st.selectbox(
+            "选择数据源",
+            ["tushare", "yfinance", "akshare"],
+            format_func=lambda x: "Tushare" if x == "tushare" else "Yahoo Finance" if x == "yfinance" else "AKShare",
+            help="选择股票数据来源，默认为Tushare"
+        )
+        
         # 股票选择
         st.subheader("股票选择")
         symbol = st.text_input("股票代码", value="600519", help="输入股票代码，如600519（贵州茅台）, 000001（平安银行）等")
+        
+        # 显示股票名称
+        if symbol:
+            try:
+                stock_name = get_stock_name(symbol, data_provider)
+                st.info(f"📈 股票名称: {stock_name}")
+            except Exception as e:
+                st.warning(f"⚠️ 无法获取股票名称: {e}")
         
         # 日期选择
         st.subheader("时间范围")
@@ -143,7 +166,10 @@ def main():
     if run_backtest or run_model_only:
         with st.spinner("正在获取数据和运行分析..."):
             # 获取数据
-            data = load_stock_data(symbol, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+            data = load_stock_data(symbol, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), data_provider)
+            
+            # 获取股票名称
+            stock_name = get_stock_name(symbol, data_provider)
             
             if data.empty:
                 st.error("❌ 无法获取数据，请检查股票代码或日期范围")
@@ -154,7 +180,7 @@ def main():
                 try:
                     analyzer = StockAnalyzer()
                     # 传递模型平台参数
-                    model_platform_to_use = model_platform if enable_model_analysis else 'local'
+                    model_platform_to_use = model_platform if enable_model_analysis and 'model_platform' in locals() else 'local'
                     model_results = analyzer.analyze_stock(
                         symbol, 
                         data, 
@@ -179,7 +205,7 @@ def main():
                     return
                 
                 # 显示结果
-                display_results(data, results, symbol, strategy_name)
+                display_results(data, results, symbol, strategy_name, stock_name)
     
     else:
         # 默认显示
@@ -200,12 +226,12 @@ def main():
             st.subheader("📊 可视化分析")
             st.write("丰富的图表和性能指标分析")
 
-def display_results(data, results, symbol, strategy_name):
+def display_results(data, results, symbol, strategy_name, stock_name):
     """显示回测结果"""
     portfolio = results['portfolio']
     
     # 性能指标
-    st.header(f"📊 {symbol} - {strategy_name} 回测结果")
+    st.header(f"📊 {stock_name} ({symbol}) - {strategy_name} 回测结果")
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -368,6 +394,33 @@ def display_model_analysis(model_results):
         st.metric(
             label="股票代码",
             value=model_results['stock_code']
+        )
+    
+    with col2:
+        # 尝试获取股票名称
+        try:
+            stock_name = get_stock_name(model_results['stock_code'], "tushare")
+            st.metric(
+                label="股票名称",
+                value=stock_name
+            )
+        except:
+            st.metric(
+                label="分析日期",
+                value=model_results['analysis_date']
+            )
+    
+    with col3:
+        st.metric(
+            label="数据周期",
+            value=f"{model_results['data_period']['days']}天"
+        )
+    
+    with col4:
+        platform_name = "本地模型服务" if model_results.get('model_platform') == 'local' else "深度求索平台" if model_results.get('model_platform') == 'deepseek' else "默认平台"
+        st.metric(
+            label="模型平台",
+            value=platform_name
         )
     
     with col2:

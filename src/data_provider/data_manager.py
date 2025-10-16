@@ -218,3 +218,57 @@ class DataManager:
         except Exception as e:
             logger.error(f"获取实时数据失败: {e}")
             return {}
+    
+    def get_stock_name(self, symbol: str, provider: Optional[str] = None) -> str:
+        """获取股票名称"""
+        provider = provider or self.default_provider
+        
+        # 股票名称映射（常见A股股票）
+        stock_name_mapping = {
+            '600519': '贵州茅台',
+            '000001': '平安银行',
+            '000858': '五粮液',
+            '600036': '招商银行',
+            '601318': '中国平安',
+            '000333': '美的集团',
+            '000651': '格力电器',
+            '600276': '恒瑞医药',
+            '600887': '伊利股份',
+            '600900': '长江电力',
+            '601888': '中国中免',
+            '603259': '药明康德',
+            '300750': '宁德时代',
+            '002415': '海康威视',
+            '600030': '中信证券',
+            '601166': '兴业银行',
+            '601328': '交通银行',
+            '601398': '工商银行',
+            '601939': '建设银行',
+            '601988': '中国银行'
+        }
+        
+        # 去除后缀的股票代码
+        clean_symbol = symbol.split('.')[0] if '.' in symbol else symbol
+        
+        if clean_symbol in stock_name_mapping:
+            return stock_name_mapping[clean_symbol]
+        
+        # 如果映射中没有，尝试从数据源获取
+        try:
+            if provider == 'yfinance':
+                ticker = yf.Ticker(symbol)
+                info = ticker.info
+                return info.get('longName', symbol) or info.get('shortName', symbol)
+            elif provider == 'tushare':
+                import tushare as ts
+                if API_CONFIG['tushare_token']:
+                    ts.set_token(API_CONFIG['tushare_token'])
+                    pro = ts.pro_api()
+                    # 获取股票基本信息
+                    data = pro.stock_basic(ts_code=symbol)
+                    if not data.empty:
+                        return data.iloc[0]['name']
+        except Exception as e:
+            logger.warning(f"获取股票名称失败: {e}")
+        
+        return symbol  # 如果无法获取名称，返回原始代码
