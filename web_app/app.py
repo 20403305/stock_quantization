@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 
-from src.data_provider.data_manager import DataManager, get_stock_name, search_stock, get_stock_mapping
+from src.data_provider.data_manager import DataManager, get_stock_name, search_stock, get_stock_mapping, get_company_info
 from src.strategy.ma_strategy import MAStrategy
 from src.strategy.rsi_strategy import RSIStrategy
 from src.strategy.macd_strategy import MACDStrategy
@@ -51,6 +51,11 @@ def cached_get_stock_name(symbol, data_provider):
     return get_stock_name(symbol, provider=data_provider)
 
 @st.cache_data
+def cached_get_company_info(symbol, data_provider):
+    """获取上市公司基本信息（缓存）"""
+    return get_company_info(symbol, provider=data_provider)
+
+@st.cache_data
 def run_strategy_backtest(data, strategy_name, **params):
     """运行策略回测"""
     if strategy_name == "移动平均策略":
@@ -81,6 +86,12 @@ def main():
     """主函数"""
     st.title("🚀 Python量化交易平台")
     st.markdown("---")
+    
+    # 初始化变量
+    symbol = "600519"
+    stock_name = "贵州茅台"
+    model_platform = "local"
+    selected_model = "deepseek-r1:7b"
     
     # 侧边栏
     with st.sidebar:
@@ -115,27 +126,30 @@ def main():
                         # 如果只有一个结果，自动选择
                         selected_option = options[0]
                         symbol = search_results[0]['code']
-                        st.success(f"✅ 自动选择: {selected_option}")
+                        stock_name = search_results[0]['name']
+                        st.success(f"✅ 当前选择: {symbol} - {stock_name}")
                     else:
                         # 多个结果，让用户选择
                         selected_option = st.selectbox("选择股票", options)
                         symbol = selected_option.split(' - ')[0]
+                        stock_name = selected_option.split(' - ')[1]
+                        st.info(f"📈 当前选择: {symbol} - {stock_name}")
                 else:
                     # 没有搜索结果，使用输入作为股票代码
                     symbol = search_query
-                    st.warning("⚠️ 未找到匹配的股票，将使用输入作为股票代码")
+                    try:
+                        stock_name = cached_get_stock_name(symbol, data_provider)
+                        st.warning(f"⚠️ 未找到匹配的股票，将使用输入作为股票代码: {symbol} - {stock_name}")
+                    except:
+                        st.warning(f"⚠️ 未找到匹配的股票，将使用输入作为股票代码: {symbol}")
                     
             except Exception as e:
                 st.warning(f"⚠️ 搜索失败: {e}")
                 symbol = search_query
-        
-        # 显示股票名称
-        if 'symbol' in locals() and symbol:
-            try:
-                stock_name = cached_get_stock_name(symbol, data_provider)
-                st.info(f"📈 当前选择: {symbol} - {stock_name}")
-            except Exception as e:
-                st.warning(f"⚠️ 无法获取股票名称: {e}")
+                try:
+                    stock_name = cached_get_stock_name(symbol, data_provider)
+                except:
+                    stock_name = symbol
         
         # 日期选择
         st.subheader("时间范围")
@@ -263,6 +277,11 @@ def main():
         # 确保变量已定义
         if 'symbol' not in locals():
             symbol = "600519"  # 默认股票代码
+        if 'stock_name' not in locals():
+            try:
+                stock_name = cached_get_stock_name(symbol, data_provider)
+            except:
+                stock_name = symbol
         if 'model_platform' not in locals():
             model_platform = "local"
         if 'selected_model' not in locals():
@@ -278,6 +297,14 @@ def main():
             if data.empty:
                 st.error("❌ 无法获取数据，请检查股票代码或日期范围")
                 return
+            
+            # 获取上市公司基本信息
+            try:
+                company_info = cached_get_company_info(symbol, data_provider)
+                if company_info:
+                    display_company_info(company_info)
+            except Exception as e:
+                st.warning(f"⚠️ 获取上市公司信息失败: {e}")
             
             # 运行模型分析
             if enable_model_analysis or run_model_only:
@@ -313,16 +340,16 @@ def main():
                     st.error("❌ 回测运行失败")
                     return
                 
-                # 显示结果 - 这里会调用display_results，其中也会显示模型分析
-                model_results_to_pass = None
+                # 显示结果 - 先显示回测结果，再显示模型分析
+                display_results(data, results, symbol, strategy_name, stock_name)
+                
+                # 如果启用了模型分析，单独显示模型分析报告
                 if enable_model_analysis:
                     try:
-                        if 'model_results' in locals():
-                            model_results_to_pass = model_results
+                        if 'model_results' in locals() and model_results:
+                            display_model_analysis(model_results)
                     except NameError:
-                        model_results_to_pass = None
-                
-                display_results(data, results, symbol, strategy_name, stock_name, model_results_to_pass)
+                        pass
     
     else:
         # 默认显示
@@ -348,7 +375,7 @@ def display_results(data, results, symbol, strategy_name, stock_name, model_resu
     portfolio = results['portfolio']
     
     # 性能指标
-    st.header(f"📊 {stock_name} ({symbol}) - {strategy_name} 回测结果")
+    st.header(f"📊 {symbol} ({stock_name}) - {strategy_name} 回测结果")
     
     # 如果提供了模型分析结果，显示模型分析部分
     if model_results and model_results['model_analysis']['success']:
@@ -501,6 +528,59 @@ def display_results(data, results, symbol, strategy_name, stock_name, model_resu
         trades_display.columns = ['买入日期', '卖出日期', '买入价格', '卖出价格', '收益率', '持有天数']
         
         st.dataframe(trades_display, width='stretch')
+
+def display_company_info(company_info):
+    """显示上市公司基本信息"""
+    st.header("🏢 上市公司基本信息")
+    
+    # 基本信息卡片
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(
+            label="股票代码",
+            value=company_info.get('symbol', '未知')
+        )
+    
+    with col2:
+        st.metric(
+            label="公司名称",
+            value=company_info.get('name', '未知')
+        )
+    
+    with col3:
+        st.metric(
+            label="所属地区",
+            value=company_info.get('area', '未知')
+        )
+    
+    with col4:
+        st.metric(
+            label="所属行业",
+            value=company_info.get('industry', '未知')
+        )
+    
+    # 详细信息
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📋 公司概况")
+        st.write(f"**上市日期:** {company_info.get('list_date', '未知')}")
+        st.write(f"**注册日期:** {company_info.get('setup_date', '未知')}")
+        st.write(f"**市场板块:** {company_info.get('market', '未知')}")
+        st.write(f"**股票代码:** {company_info.get('ts_code', '未知')}")
+    
+    with col2:
+        st.subheader("🏭 主营业务")
+        st.write(company_info.get('main_business', '暂无信息'))
+        st.subheader("📋 经营范围")
+        st.write(company_info.get('business_scope', '暂无信息'))
+    
+    # 公司简介
+    st.subheader("📖 公司简介")
+    st.write(company_info.get('company_intro', '暂无公司简介信息'))
+    
+    st.markdown("---")
 
 def display_model_analysis(model_results):
     """显示模型分析结果"""

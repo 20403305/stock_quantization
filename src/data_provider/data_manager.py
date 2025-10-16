@@ -521,12 +521,51 @@ class DataManager:
                 ts.set_token(API_CONFIG['tushare_token'])
                 pro = ts.pro_api()
                 
-                # 获取上市公司基本信息
+                # 首先从股票列表中获取基本信息
+                stock_list = self.get_stock_list(provider)
+                stock_info = stock_list[stock_list['ts_code'] == ts_code]
+                
+                # 获取公司详细信息
                 company_info = pro.stock_company(ts_code=ts_code)
                 
-                if not company_info.empty:
-                    info = company_info.iloc[0].to_dict()
+                if not company_info.empty and not stock_info.empty:
+                    # 从股票列表获取基本信息
+                    stock_row = stock_info.iloc[0]
+                    # 从公司信息获取详细信息
+                    tushare_row = company_info.iloc[0]
+                    
+                    info = {
+                        'ts_code': ts_code,
+                        'symbol': clean_symbol,
+                        'name': stock_row.get('name', ''),  # 使用股票列表中的名称
+                        'area': stock_row.get('area', ''),  # 使用股票列表中的地区
+                        'industry': stock_row.get('industry', ''),  # 使用股票列表中的行业
+                        'market': stock_row.get('market', ''),  # 使用股票列表中的市场
+                        'list_date': stock_row.get('list_date', ''),  # 使用股票列表中的上市日期
+                        'main_business': tushare_row.get('main_business', ''),  # 使用主营业务
+                        'setup_date': tushare_row.get('setup_date', ''),  # 使用注册日期
+                        'business_scope': tushare_row.get('business_scope', ''),
+                        'company_intro': tushare_row.get('introduction', '')
+                    }
                     logger.info(f"成功获取 {symbol} 的上市公司基本信息")
+                    return info
+                elif not stock_info.empty:
+                    # 只有股票列表信息
+                    stock_row = stock_info.iloc[0]
+                    info = {
+                        'ts_code': ts_code,
+                        'symbol': clean_symbol,
+                        'name': stock_row.get('name', ''),
+                        'area': stock_row.get('area', ''),
+                        'industry': stock_row.get('industry', ''),
+                        'market': stock_row.get('market', ''),
+                        'list_date': stock_row.get('list_date', ''),
+                        'main_business': '',
+                        'setup_date': '',
+                        'business_scope': '',
+                        'company_intro': ''
+                    }
+                    logger.info(f"使用股票列表信息获取 {symbol} 的基本信息")
                     return info
                 else:
                     logger.warning(f"未找到 {symbol} 的上市公司基本信息")
@@ -583,15 +622,80 @@ class DataManager:
         if clean_symbol in fallback_info:
             return fallback_info[clean_symbol]
         
+    def _get_exchange_suffix(self, symbol):
+        """根据股票代码判断交易所后缀"""
+        # 沪市股票：600、601、603、605、688开头
+        if symbol.startswith(('600', '601', '603', '605', '688')):
+            return 'SH'
+        # 深市股票：000、001、002、003、300开头
+        elif symbol.startswith(('000', '001', '002', '003', '300')):
+            return 'SZ'
+        # 北交所股票：430、831、832、833开头
+        elif symbol.startswith(('430', '831', '832', '833')):
+            return 'BJ'
+        else:
+            return 'SH'  # 默认上海交易所
+
+    def _get_fallback_company_info(self, symbol):
+        """获取备用的公司信息（当API调用失败时使用）"""
+        fallback_info = {
+            '600519': {
+                'ts_code': '600519.SH',
+                'symbol': '600519',
+                'name': '贵州茅台',
+                'area': '贵州',
+                'industry': '白酒',
+                'market': '主板',
+                'list_date': '2001-08-27',
+                'main_business': '茅台酒系列产品的生产与销售',
+                'setup_date': '1999-11-20',
+                'business_scope': '茅台酒系列产品的生产与销售；饮料、食品、包装材料的生产、销售；防伪技术开发；信息产业相关产品的研制、开发等',
+                'company_intro': '贵州茅台酒股份有限公司是国内白酒行业的标志性企业，主要生产销售世界三大名酒之一的茅台酒。'
+            },
+            '000001': {
+                'ts_code': '000001.SZ',
+                'symbol': '000001',
+                'name': '平安银行',
+                'area': '深圳',
+                'industry': '银行',
+                'market': '主板',
+                'list_date': '1991-04-03',
+                'main_business': '商业银行业务',
+                'setup_date': '1987-12-22',
+                'business_scope': '商业银行业务',
+                'company_intro': '平安银行股份有限公司是中国平安保险（集团）股份有限公司控股的一家跨区域经营的股份制商业银行。'
+            },
+            '000858': {
+                'ts_code': '000858.SZ',
+                'symbol': '000858',
+                'name': '五粮液',
+                'area': '四川',
+                'industry': '白酒',
+                'market': '主板',
+                'list_date': '1998-04-27',
+                'main_business': '白酒生产和销售',
+                'setup_date': '1997-08-19',
+                'business_scope': '白酒生产和销售',
+                'company_intro': '宜宾五粮液股份有限公司是以五粮液及其系列酒的生产、销售为主要产业的上市公司。'
+            }
+        }
+        
+        clean_symbol = symbol.split('.')[0] if '.' in symbol else symbol
+        
+        if clean_symbol in fallback_info:
+            return fallback_info[clean_symbol]
+        
         # 返回基本信息结构
         return {
-            'ts_code': ts_code,
+            'ts_code': f"{clean_symbol}.{self._get_exchange_suffix(clean_symbol)}",
             'symbol': clean_symbol,
             'name': self.get_stock_name(symbol),
             'area': '未知',
             'industry': '未知',
             'market': '主板',
             'list_date': '未知',
+            'main_business': '未知',
+            'setup_date': '未知',
             'business_scope': '未知',
             'company_intro': '未知'
         }
