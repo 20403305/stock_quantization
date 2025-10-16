@@ -224,7 +224,9 @@ def main():
                     
                     if model_results['model_analysis']['success']:
                         st.success("✅ AI模型分析完成")
-                        display_model_analysis(model_results)
+                        # 仅在仅运行模型分析时显示模型分析结果
+                        if run_model_only:
+                            display_model_analysis(model_results)
                     else:
                         st.error(f"❌ 模型分析失败: {model_results['model_analysis'].get('error', '未知错误')}")
                 except Exception as e:
@@ -238,8 +240,15 @@ def main():
                     st.error("❌ 回测运行失败")
                     return
                 
-                # 显示结果
-                display_results(data, results, symbol, strategy_name, stock_name)
+                # 显示结果 - 这里会调用display_results，其中也会显示模型分析
+                model_results_to_pass = None
+                if enable_model_analysis:
+                    try:
+                        model_results_to_pass = model_results
+                    except NameError:
+                        model_results_to_pass = None
+                
+                display_results(data, results, symbol, strategy_name, stock_name, model_results_to_pass)
     
     else:
         # 默认显示
@@ -260,12 +269,17 @@ def main():
             st.subheader("📊 可视化分析")
             st.write("丰富的图表和性能指标分析")
 
-def display_results(data, results, symbol, strategy_name, stock_name):
+def display_results(data, results, symbol, strategy_name, stock_name, model_results=None):
     """显示回测结果"""
     portfolio = results['portfolio']
     
     # 性能指标
     st.header(f"📊 {stock_name} ({symbol}) - {strategy_name} 回测结果")
+    
+    # 如果提供了模型分析结果，显示模型分析部分
+    if model_results and model_results['model_analysis']['success']:
+        display_model_analysis(model_results)
+        st.markdown("---")
     
     col1, col2, col3, col4 = st.columns(4)
     
