@@ -152,9 +152,10 @@ class StockAnalyzer:
     
     def analyze_stock(self, stock_code: str, data: pd.DataFrame, 
                      start_date: str, force_refresh: bool = False, 
-                     model_platform: Optional[str] = None) -> Dict[str, Any]:
+                     model_platform: Optional[str] = None, 
+                     model_name: Optional[str] = None) -> Dict[str, Any]:
         """综合分析股票"""
-        logger.info(f"开始分析股票 {stock_code}")
+        logger.info(f"开始分析股票 {stock_code}, 平台: {model_platform}, 模型: {model_name}")
         
         # 计算技术指标（立即返回）
         technical_indicators = self.calculate_technical_indicators(data)
@@ -181,7 +182,8 @@ class StockAnalyzer:
             },
             'model_analysis_ready': False,
             'model_analysis': None,
-            'model_platform': model_platform or 'default'
+            'model_platform': model_platform or 'default',
+            'model_name': model_name or 'default'
         }
         
         # 异步进行模型分析（如果不需要强制刷新且技术指标相同，可能使用缓存）
@@ -193,7 +195,8 @@ class StockAnalyzer:
                 recent_data=recent_data_summary,
                 report_data=report_data,
                 force_refresh=force_refresh,
-                platform=model_platform
+                platform=model_platform,
+                model_name=model_name
             )
             
             immediate_result['model_analysis'] = model_analysis

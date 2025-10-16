@@ -55,6 +55,18 @@ def run_strategy_backtest(data, strategy_name, **params):
     backtest_engine = BacktestEngine()
     return backtest_engine.run_backtest(data, strategy)
 
+@st.cache_data
+def run_model_analysis(symbol, data, start_date, model_platform, model_name):
+    """运行模型分析（带缓存）"""
+    analyzer = StockAnalyzer()
+    return analyzer.analyze_stock(
+        symbol, 
+        data, 
+        start_date,
+        model_platform=model_platform,
+        model_name=model_name
+    )
+
 def main():
     """主函数"""
     st.title("🚀 Python量化交易平台")
@@ -178,14 +190,17 @@ def main():
             # 运行模型分析
             if enable_model_analysis or run_model_only:
                 try:
-                    analyzer = StockAnalyzer()
-                    # 传递模型平台参数
-                    model_platform_to_use = model_platform if enable_model_analysis and 'model_platform' in locals() else 'local'
-                    model_results = analyzer.analyze_stock(
+                    # 确定模型平台和模型名称
+                    model_platform_to_use = model_platform if enable_model_analysis else 'local'
+                    model_name_to_use = selected_model if enable_model_analysis else 'deepseek-r1:1.5b'
+                    
+                    # 使用缓存的模型分析函数
+                    model_results = run_model_analysis(
                         symbol, 
                         data, 
                         start_date.strftime('%Y-%m-%d'),
-                        model_platform=model_platform_to_use
+                        model_platform_to_use,
+                        model_name_to_use
                     )
                     
                     if model_results['model_analysis']['success']:

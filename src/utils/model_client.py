@@ -346,11 +346,13 @@ class ModelClient:
 # 全局模型客户端实例
 _model_client = None
 
-def get_model_client(platform: str = None) -> ModelClient:
+def get_model_client(platform: str = None, model_name: str = None) -> ModelClient:
     """获取模型客户端单例"""
     global _model_client
-    if _model_client is None or (platform and _model_client.platform != platform):
+    if _model_client is None or (platform and _model_client.platform != platform) or (model_name and _model_client.default_model != model_name):
         _model_client = ModelClient(platform=platform)
+        if model_name:
+            _model_client.default_model = model_name
     return _model_client
 
 def analyze_stock_with_model(stock_code: str, 
@@ -359,7 +361,8 @@ def analyze_stock_with_model(stock_code: str,
                            recent_data: str, 
                            report_data: str,
                            force_refresh: bool = False,
-                           platform: str = None) -> Dict[str, Any]:
+                           platform: str = None,
+                           model_name: str = None) -> Dict[str, Any]:
     """使用模型分析股票"""
-    client = get_model_client(platform=platform)
+    client = get_model_client(platform=platform, model_name=model_name)
     return client.get_stock_analysis(stock_code, start_date, technical_summary, recent_data, report_data, force_refresh)
