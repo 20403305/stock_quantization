@@ -266,35 +266,32 @@ class DataManager:
         """获取股票名称"""
         provider = provider or self.default_provider
         
-        # 股票名称映射（常见A股股票）
-        stock_name_mapping = {
+        # 优先从缓存文件中查找
+        if self.stock_list_cache_file.exists():
+            try:
+                df = pd.read_csv(self.stock_list_cache_file)
+                # 双重匹配：symbol和ts_code
+                clean_symbol = symbol.split('.')[0] if '.' in symbol else symbol
+                row = df[(df['symbol'] == clean_symbol) | (df['ts_code'].str.startswith(clean_symbol + '.'))]
+                if not row.empty:
+                    return row.iloc[0]['name']
+            except Exception as e:
+                logger.warning(f"从缓存文件读取股票名称失败: {e}")
+        
+        # 备用方案：硬编码映射
+        stock_names = {
             '600519': '贵州茅台',
+            '000002': '万科A',
             '000001': '平安银行',
-            '000858': '五粮液',
-            '600036': '招商银行',
-            '601318': '中国平安',
-            '000333': '美的集团',
-            '000651': '格力电器',
-            '600276': '恒瑞医药',
-            '600887': '伊利股份',
-            '600900': '长江电力',
-            '601888': '中国中免',
-            '603259': '药明康德',
-            '300750': '宁德时代',
-            '002415': '海康威视',
-            '600030': '中信证券',
-            '601166': '兴业银行',
-            '601328': '交通银行',
             '601398': '工商银行',
-            '601939': '建设银行',
-            '601988': '中国银行'
+            '300750': '宁德时代'
         }
         
         # 去除后缀的股票代码
         clean_symbol = symbol.split('.')[0] if '.' in symbol else symbol
         
-        if clean_symbol in stock_name_mapping:
-            return stock_name_mapping[clean_symbol]
+        if clean_symbol in stock_names:
+            return stock_names[clean_symbol]
         
         # 如果映射中没有，尝试从数据源获取
         try:
