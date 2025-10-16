@@ -60,7 +60,7 @@ def main():
         
         # 股票选择
         st.subheader("股票选择")
-        symbol = st.text_input("股票代码", value="AAPL", help="输入股票代码，如AAPL, TSLA等")
+        symbol = st.text_input("股票代码", value="600519", help="输入股票代码，如600519（贵州茅台）, 000001（平安银行）等")
         
         # 日期选择
         st.subheader("时间范围")
