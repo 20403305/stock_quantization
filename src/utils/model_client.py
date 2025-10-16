@@ -52,16 +52,29 @@ class AnalysisCache:
 class ModelClient:
     """模型客户端类"""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, platform: str = None):
         """初始化模型客户端"""
         self.config = config or MODEL_CONFIG
-        self.api_endpoint: str = str(self.config['api_endpoint'])
-        self.api_key: str = str(self.config['api_key'])
-        self.max_tokens: int = int(self.config['max_tokens'])
-        self.temperature: float = float(self.config['temperature'])
+        self.platform = platform or str(self.config.get('default_platform', 'local'))
+        
+        # 获取平台配置
+        platforms_config = self.config.get('platforms', {})
+        platform_config = platforms_config.get(self.platform, {})
+        
+        if not platform_config or not platform_config.get('enabled', False):
+            # 如果平台不可用，回退到默认平台
+            self.platform = str(self.config.get('default_platform', 'local'))
+            platform_config = platforms_config.get(self.platform, {})
+        
+        self.api_endpoint: str = str(platform_config.get('api_endpoint', ''))
+        self.api_key: str = str(platform_config.get('api_key', ''))
+        self.default_model: str = str(platform_config.get('default_model', ''))
+        self.platform_name: str = str(platform_config.get('name', self.platform))
+        self.max_tokens: int = int(self.config.get('max_tokens', 4096))
+        self.temperature: float = float(self.config.get('temperature', 0.7))
         
         # 处理timeout参数，确保是float类型
-        timeout_config: Union[str, int, float] = self.config['timeout']
+        timeout_config = self.config.get('timeout', 120)
         if isinstance(timeout_config, (int, float)):
             self.timeout: float = float(timeout_config)
         elif isinstance(timeout_config, str):
@@ -73,7 +86,7 @@ class ModelClient:
             self.timeout: float = 120.0  # 默认2分钟
         
         # 处理connection_timeout参数
-        connection_timeout_config: Union[str, int, float] = self.config.get('connection_timeout', 3.0)
+        connection_timeout_config = self.config.get('connection_timeout', 3.0)
         if isinstance(connection_timeout_config, (int, float)):
             self.connection_timeout: float = float(connection_timeout_config)
         elif isinstance(connection_timeout_config, str):
@@ -93,13 +106,13 @@ class ModelClient:
         # 初始化缓存
         self.cache = AnalysisCache()
         
-        logger.info(f"模型客户端初始化完成 - 端点: {self.api_endpoint}, 超时: {self.timeout}秒, 连接超时: {self.connection_timeout}秒")
+        logger.info(f"模型客户端初始化完成 - 平台: {self.platform_name}, 端点: {self.api_endpoint}, 超时: {self.timeout}秒, 连接超时: {self.connection_timeout}秒")
     
     def chat_completion(self, messages: List[Dict[str, str]], 
                        model: Optional[str] = None,
                        **kwargs) -> Dict[str, Any]:
         """发送聊天补全请求"""
-        model = model or self.config['default_model']
+        model = model or self.default_model
         
         payload = {
             'model': model,
@@ -333,11 +346,11 @@ class ModelClient:
 # 全局模型客户端实例
 _model_client = None
 
-def get_model_client() -> ModelClient:
+def get_model_client(platform: str = None) -> ModelClient:
     """获取模型客户端单例"""
     global _model_client
-    if _model_client is None:
-        _model_client = ModelClient()
+    if _model_client is None or (platform and _model_client.platform != platform):
+        _model_client = ModelClient(platform=platform)
     return _model_client
 
 def analyze_stock_with_model(stock_code: str, 
@@ -345,7 +358,8 @@ def analyze_stock_with_model(stock_code: str,
                            technical_summary: str,
                            recent_data: str, 
                            report_data: str,
-                           force_refresh: bool = False) -> Dict[str, Any]:
+                           force_refresh: bool = False,
+                           platform: str = None) -> Dict[str, Any]:
     """使用模型分析股票"""
-    client = get_model_client()
+    client = get_model_client(platform=platform)
     return client.get_stock_analysis(stock_code, start_date, technical_summary, recent_data, report_data, force_refresh)

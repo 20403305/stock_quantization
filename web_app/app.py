@@ -107,6 +107,31 @@ def main():
         st.subheader("🤖 AI模型分析")
         enable_model_analysis = st.checkbox("启用AI模型分析", value=True)
         
+        if enable_model_analysis:
+            # 模型平台选择
+            st.subheader("模型平台")
+            model_platform = st.selectbox(
+                "选择AI模型平台",
+                ["local", "deepseek"],
+                format_func=lambda x: "本地模型服务" if x == "local" else "深度求索平台",
+                help="选择不同的AI模型平台进行分析"
+            )
+            
+            # 模型选择
+            if model_platform == "local":
+                model_options = ["deepseek-r1:1.5b", "deepseek-r1:7b", "deepseek-r1:14b"]
+                default_model = "deepseek-r1:1.5b"
+            else:
+                model_options = ["deepseek-chat", "deepseek-coder"]
+                default_model = "deepseek-chat"
+            
+            selected_model = st.selectbox(
+                "选择模型",
+                model_options,
+                index=model_options.index(default_model) if default_model in model_options else 0,
+                help="选择具体的AI模型进行分析"
+            )
+        
         # 运行按钮
         col1, col2 = st.columns(2)
         with col1:
@@ -128,7 +153,14 @@ def main():
             if enable_model_analysis or run_model_only:
                 try:
                     analyzer = StockAnalyzer()
-                    model_results = analyzer.analyze_stock(symbol, data, start_date.strftime('%Y-%m-%d'))
+                    # 传递模型平台参数
+                    model_platform_to_use = model_platform if enable_model_analysis else 'local'
+                    model_results = analyzer.analyze_stock(
+                        symbol, 
+                        data, 
+                        start_date.strftime('%Y-%m-%d'),
+                        model_platform=model_platform_to_use
+                    )
                     
                     if model_results['model_analysis']['success']:
                         st.success("✅ AI模型分析完成")
@@ -330,7 +362,7 @@ def display_model_analysis(model_results):
     technical_data = model_results['technical_indicators']
     
     # 基本信息
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.metric(
@@ -348,6 +380,13 @@ def display_model_analysis(model_results):
         st.metric(
             label="数据周期",
             value=f"{model_results['data_period']['days']}天"
+        )
+    
+    with col4:
+        platform_name = "本地模型服务" if model_results.get('model_platform') == 'local' else "深度求索平台" if model_results.get('model_platform') == 'deepseek' else "默认平台"
+        st.metric(
+            label="模型平台",
+            value=platform_name
         )
     
     # 技术指标概览
