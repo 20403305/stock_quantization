@@ -387,7 +387,7 @@ def display_results(data, results, symbol, strategy_name, stock_name, model_resu
                 f"{results['max_drawdown']:.2%}"
             ]
         })
-        st.dataframe(metrics_df, use_container_width=True)
+        st.dataframe(metrics_df, width='stretch')
     
     with col2:
         trade_df = pd.DataFrame({
@@ -399,7 +399,7 @@ def display_results(data, results, symbol, strategy_name, stock_name, model_resu
                 f"¥{results['final_value']:,.0f}"
             ]
         })
-        st.dataframe(trade_df, use_container_width=True)
+        st.dataframe(trade_df, width='stretch')
     
     # 图表
     st.subheader("📈 价格走势与交易信号")
@@ -477,7 +477,7 @@ def display_results(data, results, symbol, strategy_name, stock_name, model_resu
     fig.update_yaxes(title_text="资产价值", row=2, col=1)
     fig.update_yaxes(title_text="回撤%", row=3, col=1)
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
     
     # 交易记录
     if 'trades' in results and not results['trades'].empty:
@@ -488,7 +488,7 @@ def display_results(data, results, symbol, strategy_name, stock_name, model_resu
         trades_display['return'] = trades_display['return'].apply(lambda x: f"{x:.2%}")
         trades_display.columns = ['买入日期', '卖出日期', '买入价格', '卖出价格', '收益率', '持有天数']
         
-        st.dataframe(trades_display, use_container_width=True)
+        st.dataframe(trades_display, width='stretch')
 
 def display_model_analysis(model_results):
     """显示模型分析结果"""
