@@ -38,6 +38,10 @@ def search_stock(query: str, provider: Optional[str] = None) -> List[Dict[str, s
     """搜索股票（独立函数）"""
     return get_data_manager().search_stock(query, provider)
 
+def get_company_info(symbol: str, provider: Optional[str] = None) -> Dict[str, Any]:
+    """获取上市公司基本信息（独立函数）"""
+    return get_data_manager().get_company_info(symbol, provider)
+
 class DataManager:
     """数据管理器类"""
     
@@ -50,11 +54,12 @@ class DataManager:
         self.default_provider = DATA_CONFIG['default_provider']
         
         # 缓存目录
-        self.cache_dir = Path(DATA_CONFIG['data_dir']) / 'cache'
+        self.cache_dir = Path(str(DATA_CONFIG['data_dir'])) / 'cache'
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         # 股票列表缓存文件
         self.stock_list_cache_file = self.cache_dir / 'stock_list_cache.csv'
+        self.company_info_cache_file = self.cache_dir / 'company_info_cache.csv'
         self.cache_expire_hours = 24  # 缓存过期时间（小时）
     
     def get_stock_data(
@@ -488,7 +493,7 @@ class DataManager:
         
         # 模糊搜索
         for code, name in mapping.items():
-            if code.isdigit():  # 只处理代码到名称的映射
+            if isinstance(code, str) and code.isdigit():  # 只处理代码到名称的映射
                 if query in code or query in name:
                     results.append({
                         'code': code,
@@ -497,3 +502,96 @@ class DataManager:
                     })
         
         return results
+    
+    def get_company_info(self, symbol: str, provider: Optional[str] = None) -> Dict[str, Any]:
+        """获取上市公司基本信息"""
+        provider = provider or self.default_provider
+        
+        # 格式化股票代码
+        ts_code = self._format_symbol(symbol, None)
+        clean_symbol = symbol.split('.')[0] if '.' in symbol else symbol
+        
+        try:
+            if provider == 'tushare':
+                import tushare as ts
+                if not API_CONFIG['tushare_token']:
+                    logger.error("未配置Tushare Token")
+                    return self._get_fallback_company_info(symbol)
+                
+                ts.set_token(API_CONFIG['tushare_token'])
+                pro = ts.pro_api()
+                
+                # 获取上市公司基本信息
+                company_info = pro.stock_company(ts_code=ts_code)
+                
+                if not company_info.empty:
+                    info = company_info.iloc[0].to_dict()
+                    logger.info(f"成功获取 {symbol} 的上市公司基本信息")
+                    return info
+                else:
+                    logger.warning(f"未找到 {symbol} 的上市公司基本信息")
+                    return self._get_fallback_company_info(symbol)
+            else:
+                logger.warning(f"数据提供商 {provider} 不支持上市公司基本信息获取")
+                return self._get_fallback_company_info(symbol)
+                
+        except Exception as e:
+            logger.error(f"获取上市公司基本信息失败: {e}")
+            return self._get_fallback_company_info(symbol)
+    
+    def _get_fallback_company_info(self, symbol: str) -> Dict[str, Any]:
+        """获取备用上市公司基本信息（当API调用失败时使用）"""
+        # 常见A股公司的基本信息
+        fallback_info = {
+            '600519': {
+                'ts_code': '600519.SH',
+                'symbol': '600519',
+                'name': '贵州茅台',
+                'area': '贵州',
+                'industry': '白酒',
+                'market': '主板',
+                'list_date': '2001-08-27',
+                'business_scope': '茅台酒系列产品的生产与销售',
+                'company_intro': '贵州茅台酒股份有限公司是国内白酒行业的标志性企业，主要生产销售茅台酒系列产品。'
+            },
+            '000001': {
+                'ts_code': '000001.SZ',
+                'symbol': '000001',
+                'name': '平安银行',
+                'area': '深圳',
+                'industry': '银行',
+                'market': '主板',
+                'list_date': '1991-04-03',
+                'business_scope': '商业银行业务',
+                'company_intro': '平安银行股份有限公司是中国平安保险（集团）股份有限公司控股的一家跨区域经营的股份制商业银行。'
+            },
+            '000858': {
+                'ts_code': '000858.SZ',
+                'symbol': '000858',
+                'name': '五粮液',
+                'area': '四川',
+                'industry': '白酒',
+                'market': '主板',
+                'list_date': '1998-04-27',
+                'business_scope': '白酒生产和销售',
+                'company_intro': '宜宾五粮液股份有限公司是以五粮液及其系列酒的生产、销售为主要产业的上市公司。'
+            }
+        }
+        
+        clean_symbol = symbol.split('.')[0] if '.' in symbol else symbol
+        
+        if clean_symbol in fallback_info:
+            return fallback_info[clean_symbol]
+        
+        # 返回基本信息结构
+        return {
+            'ts_code': ts_code,
+            'symbol': clean_symbol,
+            'name': self.get_stock_name(symbol),
+            'area': '未知',
+            'industry': '未知',
+            'market': '主板',
+            'list_date': '未知',
+            'business_scope': '未知',
+            'company_intro': '未知'
+        }
