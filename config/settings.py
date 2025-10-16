@@ -106,7 +106,7 @@ MODEL_CONFIG = {
             'api_endpoint': os.getenv('ALIBABA_API_ENDPOINT', 'https://dashscope.aliyuncs.com/compatible-mode/v1/'),
             'api_key': os.getenv('ALIBABA_API_KEY', ''),
             'default_model': os.getenv('ALIBABA_DEFAULT_MODEL', 'qwen-turbo'),
-            'enabled': os.getenv('ALIBABA_ENABLED', 'False').lower() == 'true',
+            'enabled': os.getenv('ALIBABA_ENABLED', 'True').lower() == 'true',
             'available_models': ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-long']
         },
         'siliconflow': {
@@ -114,7 +114,7 @@ MODEL_CONFIG = {
             'api_endpoint': os.getenv('SILICONFLOW_API_ENDPOINT', 'https://api.siliconflow.cn'),
             'api_key': os.getenv('SILICONFLOW_API_KEY', ''),
             'default_model': os.getenv('SILICONFLOW_DEFAULT_MODEL', 'deepseek-llm-7b-chat'),
-            'enabled': os.getenv('SILICONFLOW_ENABLED', 'False').lower() == 'true',
+            'enabled': os.getenv('SILICONFLOW_ENABLED', 'True').lower() == 'true',
             'available_models': ['deepseek-llm-7b-chat', 'deepseek-coder-7b-instruct', 'llama-2-7b-chat']
         },
         'tencent': {
@@ -122,7 +122,7 @@ MODEL_CONFIG = {
             'api_endpoint': os.getenv('TENCENT_API_ENDPOINT', 'https://api.hunyuan.cloud.tencent.com'),
             'api_key': os.getenv('TENCENT_API_KEY', ''),
             'default_model': os.getenv('TENCENT_DEFAULT_MODEL', 'hunyuan-standard'),
-            'enabled': os.getenv('TENCENT_ENABLED', 'False').lower() == 'true',
+            'enabled': os.getenv('TENCENT_ENABLED', 'True').lower() == 'true',
             'available_models': ['hunyuan-standard', 'hunyuan-pro', 'hunyuan-lite']
         },
         'modelscope': {
@@ -130,7 +130,7 @@ MODEL_CONFIG = {
             'api_endpoint': os.getenv('MODELSCOPE_API_ENDPOINT', 'https://api-inference.modelscope.cn/v1/'),
             'api_key': os.getenv('MODELSCOPE_API_KEY', ''),
             'default_model': os.getenv('MODELSCOPE_DEFAULT_MODEL', 'qwen-7b-chat'),
-            'enabled': os.getenv('MODELSCOPE_ENABLED', 'False').lower() == 'true',
+            'enabled': os.getenv('MODELSCOPE_ENABLED', 'True').lower() == 'true',
             'available_models': ['qwen-7b-chat', 'qwen-14b-chat', 'baichuan-7b-chat', 'chatglm-6b']
         }
     },
