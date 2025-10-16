@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 
-from src.data_provider.data_manager import DataManager
+from src.data_provider.data_manager import DataManager, get_stock_name, search_stock, get_stock_mapping
 from src.strategy.ma_strategy import MAStrategy
 from src.strategy.rsi_strategy import RSIStrategy
 from src.strategy.macd_strategy import MACDStrategy
@@ -35,10 +35,20 @@ def load_stock_data(symbol, start_date, end_date, data_provider):
     return data_manager.get_stock_data(symbol, start_date, end_date, provider=data_provider)
 
 @st.cache_data
-def get_stock_name(symbol, data_provider):
-    """获取股票名称"""
+def cached_get_stock_mapping(data_provider):
+    """获取股票映射（缓存）"""
     data_manager = DataManager()
-    return data_manager.get_stock_name(symbol, provider=data_provider)
+    return data_manager.get_stock_mapping(provider=data_provider)
+
+@st.cache_data
+def cached_search_stocks(query, data_provider):
+    """搜索股票（缓存）"""
+    return search_stock(query, provider=data_provider)
+
+@st.cache_data
+def cached_get_stock_name(symbol, data_provider):
+    """获取股票名称（缓存）"""
+    return get_stock_name(symbol, provider=data_provider)
 
 @st.cache_data
 def run_strategy_backtest(data, strategy_name, **params):
@@ -87,13 +97,43 @@ def main():
         
         # 股票选择
         st.subheader("股票选择")
-        symbol = st.text_input("股票代码", value="600519", help="输入股票代码，如600519（贵州茅台）, 000001（平安银行）等")
+        
+        # 股票搜索和选择
+        search_query = st.text_input("搜索股票（代码或名称）", value="600519", 
+                                   help="输入股票代码（如600519）或名称（如贵州茅台）")
+        
+        # 搜索股票
+        if search_query:
+            try:
+                search_results = cached_search_stocks(search_query, data_provider)
+                
+                if search_results:
+                    # 创建选择列表
+                    options = [f"{result['code']} - {result['name']}" for result in search_results]
+                    
+                    if len(options) == 1:
+                        # 如果只有一个结果，自动选择
+                        selected_option = options[0]
+                        symbol = search_results[0]['code']
+                        st.success(f"✅ 自动选择: {selected_option}")
+                    else:
+                        # 多个结果，让用户选择
+                        selected_option = st.selectbox("选择股票", options)
+                        symbol = selected_option.split(' - ')[0]
+                else:
+                    # 没有搜索结果，使用输入作为股票代码
+                    symbol = search_query
+                    st.warning("⚠️ 未找到匹配的股票，将使用输入作为股票代码")
+                    
+            except Exception as e:
+                st.warning(f"⚠️ 搜索失败: {e}")
+                symbol = search_query
         
         # 显示股票名称
         if symbol:
             try:
-                stock_name = get_stock_name(symbol, data_provider)
-                st.info(f"📈 股票名称: {stock_name}")
+                stock_name = cached_get_stock_name(symbol, data_provider)
+                st.info(f"📈 当前选择: {symbol} - {stock_name}")
             except Exception as e:
                 st.warning(f"⚠️ 无法获取股票名称: {e}")
         

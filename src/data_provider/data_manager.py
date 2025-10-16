@@ -5,7 +5,7 @@
 import pandas as pd
 import yfinance as yf
 from loguru import logger
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from config.settings import DATA_CONFIG, API_CONFIG
 
 # 创建全局数据管理器实例
@@ -21,6 +21,18 @@ def get_data_manager() -> 'DataManager':
 def get_stock_name(symbol: str, provider: Optional[str] = None) -> str:
     """获取股票名称（独立函数）"""
     return get_data_manager().get_stock_name(symbol, provider)
+
+def get_stock_list(provider: Optional[str] = None) -> pd.DataFrame:
+    """获取股票列表（独立函数）"""
+    return get_data_manager().get_stock_list(provider)
+
+def get_stock_mapping(provider: Optional[str] = None) -> Dict[str, str]:
+    """获取股票映射（独立函数）"""
+    return get_data_manager().get_stock_mapping(provider)
+
+def search_stock(query: str, provider: Optional[str] = None) -> List[Dict[str, str]]:
+    """搜索股票（独立函数）"""
+    return get_data_manager().search_stock(query, provider)
 
 class DataManager:
     """数据管理器类"""
@@ -286,3 +298,107 @@ class DataManager:
             logger.warning(f"获取股票名称失败: {e}")
         
         return symbol  # 如果无法获取名称，返回原始代码
+    
+    def get_stock_list(self, provider: Optional[str] = None) -> pd.DataFrame:
+        """获取股票列表"""
+        provider = provider or self.default_provider
+        
+        try:
+            if provider == 'tushare':
+                import tushare as ts
+                if not API_CONFIG['tushare_token']:
+                    logger.error("未配置Tushare Token")
+                    return pd.DataFrame()
+                
+                ts.set_token(API_CONFIG['tushare_token'])
+                pro = ts.pro_api()
+                
+                # 获取所有正常上市交易的股票列表
+                stock_list = pro.stock_basic(
+                    exchange='', 
+                    list_status='L',  # L表示上市
+                    fields='ts_code,symbol,name,area,industry,market,list_date'
+                )
+                return stock_list
+            else:
+                logger.warning(f"数据提供商 {provider} 不支持股票列表获取")
+                return pd.DataFrame()
+                
+        except Exception as e:
+            logger.error(f"获取股票列表失败: {e}")
+            return pd.DataFrame()
+    
+    def get_stock_mapping(self, provider: Optional[str] = None) -> Dict[str, str]:
+        """获取股票映射（代码->名称，名称->代码）"""
+        stock_list = self.get_stock_list(provider)
+        
+        if stock_list.empty:
+            # 返回默认的映射
+            return {
+                '600519': '贵州茅台',
+                '000001': '平安银行',
+                '000858': '五粮液',
+                '600036': '招商银行',
+                '601318': '中国平安',
+                '000333': '美的集团',
+                '000651': '格力电器',
+                '600276': '恒瑞医药',
+                '600887': '伊利股份',
+                '600900': '长江电力',
+                '601888': '中国中免',
+                '603259': '药明康德',
+                '300750': '宁德时代',
+                '002415': '海康威视',
+                '600030': '中信证券',
+                '601166': '兴业银行',
+                '601328': '交通银行',
+                '601398': '工商银行',
+                '601939': '建设银行',
+                '601988': '中国银行'
+            }
+        
+        # 构建双向映射
+        mapping = {}
+        for _, row in stock_list.iterrows():
+            code = row['ts_code'].split('.')[0]  # 去除后缀
+            name = row['name']
+            mapping[code] = name
+            mapping[name] = code
+        
+        return mapping
+    
+    def search_stock(self, query: str, provider: Optional[str] = None) -> List[Dict[str, str]]:
+        """搜索股票"""
+        mapping = self.get_stock_mapping(provider)
+        results = []
+        
+        # 清理查询字符串
+        query = query.strip().upper()
+        
+        # 如果查询是股票代码，直接查找
+        if query in mapping:
+            if query.isdigit():  # 是股票代码
+                results.append({
+                    'code': query,
+                    'name': mapping[query],
+                    'ts_code': f"{query}.{'SH' if query.startswith('6') else 'SZ'}"
+                })
+            else:  # 是股票名称
+                results.append({
+                    'code': mapping[query],
+                    'name': query,
+                    'ts_code': f"{mapping[query]}.{'SH' if mapping[query].startswith('6') else 'SZ'}"
+                })
+            return results
+        
+        # 模糊搜索
+        for code, name in mapping.items():
+            if code.isdigit():  # 只处理代码到名称的映射
+                if query in code or query in name:
+                    results.append({
+                        'code': code,
+                        'name': name,
+                        'ts_code': f"{code}.{'SH' if code.startswith('6') else 'SZ'}"
+                    })
+        
+        return results
