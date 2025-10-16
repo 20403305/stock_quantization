@@ -187,8 +187,15 @@ def main():
             st.subheader("模型平台")
             model_platform = st.selectbox(
                 "选择AI模型平台",
-                ["local", "deepseek"],
-                format_func=lambda x: "本地模型服务" if x == "local" else "深度求索平台",
+                ["local", "deepseek", "alibaba", "siliconflow", "tencent", "modelscope"],
+                format_func=lambda x: {
+                    "local": "本地模型服务",
+                    "deepseek": "深度求索平台", 
+                    "alibaba": "阿里云百炼平台",
+                    "siliconflow": "硅基流动平台",
+                    "tencent": "腾讯混元平台",
+                    "modelscope": "魔搭平台"
+                }[x],
                 help="选择不同的AI模型平台进行分析"
             )
             
@@ -201,23 +208,38 @@ def main():
                 if not model_options:
                     st.warning(f"⚠️ 无法获取{model_platform}平台的模型列表，使用默认模型")
                     # 使用配置中的默认模型作为备选
-                    if model_platform == "local":
-                        model_options = ["deepseek-r1:7b"]  # 当前只部署了7b模型
-                    else:
-                        model_options = ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"]
+                    fallback_models = {
+                        "local": ["deepseek-r1:7b"],
+                        "deepseek": ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"],
+                        "alibaba": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-long"],
+                        "siliconflow": ["deepseek-llm-7b-chat", "deepseek-coder-7b-instruct", "llama-2-7b-chat"],
+                        "tencent": ["hunyuan-standard", "hunyuan-pro", "hunyuan-lite"],
+                        "modelscope": ["qwen-7b-chat", "qwen-14b-chat", "baichuan-7b-chat", "chatglm-6b"]
+                    }
+                    model_options = fallback_models.get(model_platform, ["deepseek-chat"])
             except Exception as e:
                 st.warning(f"⚠️ 获取模型列表失败: {e}")
                 # 使用配置中的默认模型作为备选
-                if model_platform == "local":
-                    model_options = ["deepseek-r1:7b"]  # 当前只部署了7b模型
-                else:
-                    model_options = ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"]
+                fallback_models = {
+                    "local": ["deepseek-r1:7b"],
+                    "deepseek": ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"],
+                    "alibaba": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-long"],
+                    "siliconflow": ["deepseek-llm-7b-chat", "deepseek-coder-7b-instruct", "llama-2-7b-chat"],
+                    "tencent": ["hunyuan-standard", "hunyuan-pro", "hunyuan-lite"],
+                    "modelscope": ["qwen-7b-chat", "qwen-14b-chat", "baichuan-7b-chat", "chatglm-6b"]
+                }
+                model_options = fallback_models.get(model_platform, ["deepseek-chat"])
             
             # 设置默认模型
-            if model_platform == "local":
-                default_model = "deepseek-r1:7b"  # 当前只部署了7b模型
-            else:
-                default_model = "deepseek-chat"
+            default_models = {
+                "local": "deepseek-r1:7b",
+                "deepseek": "deepseek-chat",
+                "alibaba": "qwen-turbo",
+                "siliconflow": "deepseek-llm-7b-chat",
+                "tencent": "hunyuan-standard",
+                "modelscope": "qwen-7b-chat"
+            }
+            default_model = default_models.get(model_platform, "deepseek-chat")
             
             selected_model = st.selectbox(
                 "选择模型",
@@ -505,7 +527,15 @@ def display_model_analysis(model_results):
         )
     
     with col4:
-        platform_name = "本地模型服务" if model_results.get('model_platform') == 'local' else "深度求索平台" if model_results.get('model_platform') == 'deepseek' else "默认平台"
+        platform_mapping = {
+            "local": "本地模型服务",
+            "deepseek": "深度求索平台", 
+            "alibaba": "阿里云百炼平台",
+            "siliconflow": "硅基流动平台",
+            "tencent": "腾讯混元平台",
+            "modelscope": "魔搭平台"
+        }
+        platform_name = platform_mapping.get(model_results.get('model_platform'), "默认平台")
         st.metric(
             label="模型平台",
             value=platform_name
