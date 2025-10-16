@@ -128,8 +128,31 @@ class ModelClient:
             payload['top_p'] = kwargs['top_p']
         
         try:
+            # 根据平台类型构建正确的API端点
+            if self.platform == 'deepseek':
+                # 深度求索平台使用标准OpenAI格式
+                api_url = f"{self.api_endpoint.rstrip('/')}/chat/completions"
+            elif self.platform == 'alibaba':
+                # 阿里云百炼平台使用兼容模式
+                api_url = f"{self.api_endpoint.rstrip('/')}/chat/completions"
+            elif self.platform == 'siliconflow':
+                # 硅基流动平台使用标准格式
+                api_url = f"{self.api_endpoint.rstrip('/')}/v1/chat/completions"
+            elif self.platform == 'tencent':
+                # 腾讯混元平台使用标准格式
+                api_url = f"{self.api_endpoint.rstrip('/')}/v1/chat/completions"
+            elif self.platform == 'modelscope':
+                # 魔搭平台使用标准格式
+                api_url = f"{self.api_endpoint.rstrip('/')}/chat/completions"
+            elif self.platform == 'zhipu':
+                # 智谱开放平台使用标准格式
+                api_url = f"{self.api_endpoint.rstrip('/')}/chat/completions"
+            else:
+                # 本地服务和其他平台
+                api_url = f"{self.api_endpoint.rstrip('/')}/chat/completions"
+            
             response = requests.post(
-                f"{self.api_endpoint}/chat/completions",
+                api_url,
                 headers=self.headers,
                 json=payload,  # 使用json参数而不是data参数
                 timeout=self.timeout
@@ -366,37 +389,109 @@ class ModelClient:
         platform_config = self.config.get('platforms', {}).get(self.platform, {})
         available_models = platform_config.get('available_models', [])
         
-        # 如果平台是深度求索，尝试动态获取模型列表
-        if self.platform == 'deepseek' and self.api_key:
-            try:
-                import requests
-                headers = {
-                    'Content-Type': 'application/json',
-                    'Authorization': f'Bearer {self.api_key}'
-                }
-                
+        # 尝试动态获取模型列表
+        dynamic_models = self._get_dynamic_models()
+        if dynamic_models:
+            # 合并预定义模型和动态获取的模型，去重
+            all_models = list(set(available_models + dynamic_models))
+            logger.info(f"成功获取{self.platform_name}模型列表: {len(all_models)} 个模型")
+            return sorted(all_models)
+        
+        logger.info(f"使用预定义模型列表: {len(available_models)} 个模型")
+        return available_models
+    
+    def _get_dynamic_models(self) -> List[str]:
+        """动态获取模型列表"""
+        if not self.api_key:
+            logger.debug(f"{self.platform_name}平台API密钥为空，跳过动态获取")
+            return []
+        
+        try:
+            import requests
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {self.api_key}'
+            }
+            
+            # 根据平台类型使用不同的API端点
+            if self.platform == 'deepseek':
+                # 深度求索平台使用标准/models端点
                 response = requests.get(
-                    f"{self.api_endpoint}/models",
+                    f"{self.api_endpoint.rstrip('/')}/models",
                     headers=headers,
                     timeout=self.connection_timeout
                 )
+            elif self.platform == 'alibaba':
+                # 阿里云百炼平台使用/models端点
+                response = requests.get(
+                    f"{self.api_endpoint.rstrip('/')}/models",
+                    headers=headers,
+                    timeout=self.connection_timeout
+                )
+            elif self.platform == 'siliconflow':
+                # 硅基流动平台使用/v1/models端点
+                response = requests.get(
+                    f"{self.api_endpoint.rstrip('/')}/v1/models",
+                    headers=headers,
+                    timeout=self.connection_timeout
+                )
+            elif self.platform == 'tencent':
+                # 腾讯混元平台使用/v1/models端点
+                response = requests.get(
+                    f"{self.api_endpoint.rstrip('/')}/v1/models",
+                    headers=headers,
+                    timeout=self.connection_timeout
+                )
+            elif self.platform == 'modelscope':
+                # 魔搭平台使用/models端点
+                response = requests.get(
+                    f"{self.api_endpoint.rstrip('/')}/models",
+                    headers=headers,
+                    timeout=self.connection_timeout
+                )
+            elif self.platform == 'zhipu':
+                # 智谱开放平台使用/models端点
+                response = requests.get(
+                    f"{self.api_endpoint.rstrip('/')}/models",
+                    headers=headers,
+                    timeout=self.connection_timeout
+                )
+            else:
+                # 其他平台不支持动态获取
+                logger.debug(f"{self.platform_name}平台不支持动态获取模型列表")
+                return []
+            
+            if response.status_code == 200:
+                models_data = response.json()
                 
-                if response.status_code == 200:
-                    models_data = response.json()
-                    if isinstance(models_data, dict) and 'data' in models_data:
-                        # 提取模型ID列表
-                        dynamic_models = [model['id'] for model in models_data['data'] if 'id' in model]
-                        # 合并预定义模型和动态获取的模型，去重
-                        all_models = list(set(available_models + dynamic_models))
-                        logger.info(f"成功获取深度求索模型列表: {len(all_models)} 个模型")
-                        return sorted(all_models)
+                # 解析不同平台的响应格式
+                if isinstance(models_data, dict):
+                    if 'data' in models_data:
+                        # OpenAI兼容格式: {"data": [{"id": "model1"}, ...]}
+                        return [model['id'] for model in models_data['data'] if 'id' in model]
+                    elif 'models' in models_data:
+                        # 其他格式: {"models": ["model1", "model2", ...]}
+                        return models_data['models']
+                    elif 'model_list' in models_data:
+                        # 其他格式: {"model_list": ["model1", "model2", ...]}
+                        return models_data['model_list']
+                elif isinstance(models_data, list):
+                    # 直接返回模型列表
+                    return models_data
                 
-                logger.warning(f"动态获取模型列表失败，使用预定义模型: {response.status_code}")
+                logger.warning(f"无法解析{self.platform_name}平台的模型列表响应格式")
+                return []
                 
-            except Exception as e:
-                logger.warning(f"动态获取模型列表异常，使用预定义模型: {e}")
-        
-        return available_models
+            else:
+                logger.warning(f"动态获取{self.platform_name}模型列表失败，状态码: {response.status_code}")
+                return []
+                
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"动态获取{self.platform_name}模型列表请求异常: {e}")
+            return []
+        except Exception as e:
+            logger.warning(f"动态获取{self.platform_name}模型列表异常: {e}")
+            return []
 
 
 # 全局模型客户端实例

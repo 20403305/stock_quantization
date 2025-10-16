@@ -103,7 +103,7 @@ MODEL_CONFIG = {
         },
         'alibaba': {
             'name': '阿里云百炼平台',
-            'api_endpoint': os.getenv('ALIBABA_API_ENDPOINT', 'https://dashscope.aliyuncs.com/compatible-mode/v1/'),
+            'api_endpoint': os.getenv('ALIBABA_API_ENDPOINT', 'https://dashscope.aliyuncs.com/compatible-mode/v1'),
             'api_key': os.getenv('ALIBABA_API_KEY', ''),
             'default_model': os.getenv('ALIBABA_DEFAULT_MODEL', 'qwen-turbo'),
             'enabled': os.getenv('ALIBABA_ENABLED', 'True').lower() == 'true',
@@ -115,7 +115,7 @@ MODEL_CONFIG = {
             'api_key': os.getenv('SILICONFLOW_API_KEY', ''),
             'default_model': os.getenv('SILICONFLOW_DEFAULT_MODEL', 'deepseek-llm-7b-chat'),
             'enabled': os.getenv('SILICONFLOW_ENABLED', 'True').lower() == 'true',
-            'available_models': ['deepseek-llm-7b-chat', 'deepseek-coder-7b-instruct', 'llama-2-7b-chat']
+            'available_models': ['deepseek-llm-7b-chat', 'deepseek-coder-7b-instruct', 'llama-2-7b-chat', 'qwen-7b-chat', 'qwen-14b-chat', 'deepseek-v2', 'deepseek-v2-lite']
         },
         'tencent': {
             'name': '腾讯混元平台',
@@ -127,11 +127,19 @@ MODEL_CONFIG = {
         },
         'modelscope': {
             'name': '魔搭平台',
-            'api_endpoint': os.getenv('MODELSCOPE_API_ENDPOINT', 'https://api-inference.modelscope.cn/v1/'),
+            'api_endpoint': os.getenv('MODELSCOPE_API_ENDPOINT', 'https://api-inference.modelscope.cn/v1'),
             'api_key': os.getenv('MODELSCOPE_API_KEY', ''),
             'default_model': os.getenv('MODELSCOPE_DEFAULT_MODEL', 'qwen-7b-chat'),
             'enabled': os.getenv('MODELSCOPE_ENABLED', 'True').lower() == 'true',
             'available_models': ['qwen-7b-chat', 'qwen-14b-chat', 'baichuan-7b-chat', 'chatglm-6b']
+        },
+        'zhipu': {
+            'name': '智谱开放平台',
+            'api_endpoint': os.getenv('ZHIPU_API_ENDPOINT', 'https://open.bigmodel.cn/api/paas/v4'),
+            'api_key': os.getenv('ZHIPU_API_KEY', ''),
+            'default_model': os.getenv('ZHIPU_DEFAULT_MODEL', 'glm-4'),
+            'enabled': os.getenv('ZHIPU_ENABLED', 'True').lower() == 'true',
+            'available_models': ['glm-4', 'glm-3-turbo', 'glm-4v', 'characterglm']
         }
     },
     'default_platform': os.getenv('DEFAULT_MODEL_PLATFORM', 'local'),

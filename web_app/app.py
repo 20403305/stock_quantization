@@ -130,7 +130,7 @@ def main():
                 symbol = search_query
         
         # 显示股票名称
-        if symbol:
+        if 'symbol' in locals() and symbol:
             try:
                 stock_name = cached_get_stock_name(symbol, data_provider)
                 st.info(f"📈 当前选择: {symbol} - {stock_name}")
@@ -187,14 +187,15 @@ def main():
             st.subheader("模型平台")
             model_platform = st.selectbox(
                 "选择AI模型平台",
-                ["local", "deepseek", "alibaba", "siliconflow", "tencent", "modelscope"],
+                ["local", "deepseek", "alibaba", "siliconflow", "tencent", "modelscope", "zhipu"],
                 format_func=lambda x: {
                     "local": "本地模型服务",
                     "deepseek": "深度求索平台", 
                     "alibaba": "阿里云百炼平台",
                     "siliconflow": "硅基流动平台",
                     "tencent": "腾讯混元平台",
-                    "modelscope": "魔搭平台"
+                    "modelscope": "魔搭平台",
+                    "zhipu": "智谱开放平台"
                 }[x],
                 help="选择不同的AI模型平台进行分析"
             )
@@ -226,7 +227,8 @@ def main():
                     "alibaba": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-long"],
                     "siliconflow": ["deepseek-llm-7b-chat", "deepseek-coder-7b-instruct", "llama-2-7b-chat"],
                     "tencent": ["hunyuan-standard", "hunyuan-pro", "hunyuan-lite"],
-                    "modelscope": ["qwen-7b-chat", "qwen-14b-chat", "baichuan-7b-chat", "chatglm-6b"]
+                    "modelscope": ["qwen-7b-chat", "qwen-14b-chat", "baichuan-7b-chat", "chatglm-6b"],
+                    "zhipu": ["glm-4", "glm-3-turbo", "glm-4v", "characterglm"]
                 }
                 model_options = fallback_models.get(model_platform, ["deepseek-chat"])
             
@@ -237,7 +239,8 @@ def main():
                 "alibaba": "qwen-turbo",
                 "siliconflow": "deepseek-llm-7b-chat",
                 "tencent": "hunyuan-standard",
-                "modelscope": "qwen-7b-chat"
+                "modelscope": "qwen-7b-chat",
+                "zhipu": "glm-4"
             }
             default_model = default_models.get(model_platform, "deepseek-chat")
             
@@ -257,6 +260,14 @@ def main():
     
     # 主内容区域
     if run_backtest or run_model_only:
+        # 确保变量已定义
+        if 'symbol' not in locals():
+            symbol = "600519"  # 默认股票代码
+        if 'model_platform' not in locals():
+            model_platform = "local"
+        if 'selected_model' not in locals():
+            selected_model = "deepseek-r1:7b"
+            
         with st.spinner("正在获取数据和运行分析..."):
             # 获取数据
             data = load_stock_data(symbol, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), data_provider)
@@ -273,7 +284,7 @@ def main():
                 try:
                     # 确定模型平台和模型名称
                     model_platform_to_use = model_platform if enable_model_analysis else 'local'
-                    model_name_to_use = selected_model if enable_model_analysis else 'deepseek-r1:1.5b'
+                    model_name_to_use = selected_model if enable_model_analysis else 'deepseek-r1:7b'
                     
                     # 使用缓存的模型分析函数
                     model_results = run_model_analysis(
@@ -306,7 +317,8 @@ def main():
                 model_results_to_pass = None
                 if enable_model_analysis:
                     try:
-                        model_results_to_pass = model_results
+                        if 'model_results' in locals():
+                            model_results_to_pass = model_results
                     except NameError:
                         model_results_to_pass = None
                 
@@ -533,7 +545,8 @@ def display_model_analysis(model_results):
             "alibaba": "阿里云百炼平台",
             "siliconflow": "硅基流动平台",
             "tencent": "腾讯混元平台",
-            "modelscope": "魔搭平台"
+            "modelscope": "魔搭平台",
+            "zhipu": "智谱开放平台"
         }
         platform_name = platform_mapping.get(model_results.get('model_platform'), "默认平台")
         st.metric(

@@ -4,6 +4,10 @@
 
 import pandas as pd
 import yfinance as yf
+import json
+import os
+from pathlib import Path
+from datetime import datetime, timedelta
 from loguru import logger
 from typing import Optional, Dict, Any, List
 from config.settings import DATA_CONFIG, API_CONFIG
@@ -44,6 +48,14 @@ class DataManager:
             'akshare': self._get_akshare_data,
         }
         self.default_provider = DATA_CONFIG['default_provider']
+        
+        # 缓存目录
+        self.cache_dir = Path(DATA_CONFIG['data_dir']) / 'cache'
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 股票列表缓存文件
+        self.stock_list_cache_file = self.cache_dir / 'stock_list_cache.json'
+        self.cache_expire_hours = 24  # 缓存过期时间（小时）
     
     def get_stock_data(
         self, 
@@ -299,16 +311,61 @@ class DataManager:
         
         return symbol  # 如果无法获取名称，返回原始代码
     
+    def _load_stock_list_from_cache(self) -> Optional[pd.DataFrame]:
+        """从缓存加载股票列表"""
+        if not self.stock_list_cache_file.exists():
+            return None
+        
+        try:
+            with open(self.stock_list_cache_file, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+            
+            # 检查缓存是否过期
+            cache_time = datetime.fromisoformat(cache_data['cache_time'])
+            if datetime.now() - cache_time > timedelta(hours=self.cache_expire_hours):
+                logger.info("股票列表缓存已过期")
+                return None
+            
+            # 加载股票列表数据
+            stock_list = pd.DataFrame(cache_data['stock_list'])
+            logger.info(f"从缓存加载股票列表，共 {len(stock_list)} 条记录")
+            return stock_list
+            
+        except Exception as e:
+            logger.warning(f"加载缓存失败: {e}")
+            return None
+    
+    def _save_stock_list_to_cache(self, stock_list: pd.DataFrame) -> None:
+        """保存股票列表到缓存"""
+        try:
+            cache_data = {
+                'cache_time': datetime.now().isoformat(),
+                'stock_list': stock_list.to_dict('records')
+            }
+            
+            with open(self.stock_list_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"股票列表缓存已保存，共 {len(stock_list)} 条记录")
+            
+        except Exception as e:
+            logger.error(f"保存缓存失败: {e}")
+    
     def get_stock_list(self, provider: Optional[str] = None) -> pd.DataFrame:
         """获取股票列表"""
         provider = provider or self.default_provider
+        
+        # 首先尝试从缓存加载
+        cached_data = self._load_stock_list_from_cache()
+        if cached_data is not None:
+            return cached_data
         
         try:
             if provider == 'tushare':
                 import tushare as ts
                 if not API_CONFIG['tushare_token']:
                     logger.error("未配置Tushare Token")
-                    return pd.DataFrame()
+                    return self._get_fallback_stock_list()
                 
                 ts.set_token(API_CONFIG['tushare_token'])
                 pro = ts.pro_api()
@@ -319,14 +376,55 @@ class DataManager:
                     list_status='L',  # L表示上市
                     fields='ts_code,symbol,name,area,industry,market,list_date'
                 )
+                
+                # 成功获取后保存到缓存
+                if not stock_list.empty:
+                    self._save_stock_list_to_cache(stock_list)
+                    logger.info(f"成功从Tushare获取股票列表，共 {len(stock_list)} 条记录")
+                else:
+                    logger.warning("从Tushare获取的股票列表为空")
+                
                 return stock_list
             else:
                 logger.warning(f"数据提供商 {provider} 不支持股票列表获取")
-                return pd.DataFrame()
+                return self._get_fallback_stock_list()
                 
         except Exception as e:
             logger.error(f"获取股票列表失败: {e}")
-            return pd.DataFrame()
+            # 返回缓存数据（即使过期）或备用列表
+            cached_data = self._load_stock_list_from_cache()
+            if cached_data is not None:
+                logger.info("使用过期的缓存数据作为备用")
+                return cached_data
+            return self._get_fallback_stock_list()
+    
+    def _get_fallback_stock_list(self) -> pd.DataFrame:
+        """获取备用股票列表（当API调用失败时使用）"""
+        fallback_stocks = [
+            {'ts_code': '600519.SH', 'symbol': '600519', 'name': '贵州茅台', 'market': '主板'},
+            {'ts_code': '000001.SZ', 'symbol': '000001', 'name': '平安银行', 'market': '主板'},
+            {'ts_code': '000858.SZ', 'symbol': '000858', 'name': '五粮液', 'market': '主板'},
+            {'ts_code': '600036.SH', 'symbol': '600036', 'name': '招商银行', 'market': '主板'},
+            {'ts_code': '601318.SH', 'symbol': '601318', 'name': '中国平安', 'market': '主板'},
+            {'ts_code': '000333.SZ', 'symbol': '000333', 'name': '美的集团', 'market': '主板'},
+            {'ts_code': '000651.SZ', 'symbol': '000651', 'name': '格力电器', 'market': '主板'},
+            {'ts_code': '600276.SH', 'symbol': '600276', 'name': '恒瑞医药', 'market': '主板'},
+            {'ts_code': '600887.SH', 'symbol': '600887', 'name': '伊利股份', 'market': '主板'},
+            {'ts_code': '600900.SH', 'symbol': '600900', 'name': '长江电力', 'market': '主板'},
+            {'ts_code': '601888.SH', 'symbol': '601888', 'name': '中国中免', 'market': '主板'},
+            {'ts_code': '603259.SH', 'symbol': '603259', 'name': '药明康德', 'market': '主板'},
+            {'ts_code': '300750.SZ', 'symbol': '300750', 'name': '宁德时代', 'market': '创业板'},
+            {'ts_code': '002415.SZ', 'symbol': '002415', 'name': '海康威视', 'market': '主板'},
+            {'ts_code': '600030.SH', 'symbol': '600030', 'name': '中信证券', 'market': '主板'},
+            {'ts_code': '601166.SH', 'symbol': '601166', 'name': '兴业银行', 'market': '主板'},
+            {'ts_code': '601328.SH', 'symbol': '601328', 'name': '交通银行', 'market': '主板'},
+            {'ts_code': '601398.SH', 'symbol': '601398', 'name': '工商银行', 'market': '主板'},
+            {'ts_code': '601939.SH', 'symbol': '601939', 'name': '建设银行', 'market': '主板'},
+            {'ts_code': '601988.SH', 'symbol': '601988', 'name': '中国银行', 'market': '主板'}
+        ]
+        
+        logger.info("使用备用股票列表")
+        return pd.DataFrame(fallback_stocks)
     
     def get_stock_mapping(self, provider: Optional[str] = None) -> Dict[str, str]:
         """获取股票映射（代码->名称，名称->代码）"""
