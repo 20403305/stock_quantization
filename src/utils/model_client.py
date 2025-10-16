@@ -372,6 +372,44 @@ class ModelClient:
             'is_demo': True
         }
 
+    def get_available_models(self) -> List[str]:
+        """获取可用的模型列表"""
+        # 从配置中获取预定义的模型列表
+        platform_config = self.config.get('platforms', {}).get(self.platform, {})
+        available_models = platform_config.get('available_models', [])
+        
+        # 如果平台是深度求索，尝试动态获取模型列表
+        if self.platform == 'deepseek' and self.api_key:
+            try:
+                import requests
+                headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {self.api_key}'
+                }
+                
+                response = requests.get(
+                    f"{self.api_endpoint}/models",
+                    headers=headers,
+                    timeout=self.connection_timeout
+                )
+                
+                if response.status_code == 200:
+                    models_data = response.json()
+                    if isinstance(models_data, dict) and 'data' in models_data:
+                        # 提取模型ID列表
+                        dynamic_models = [model['id'] for model in models_data['data'] if 'id' in model]
+                        # 合并预定义模型和动态获取的模型，去重
+                        all_models = list(set(available_models + dynamic_models))
+                        logger.info(f"成功获取深度求索模型列表: {len(all_models)} 个模型")
+                        return sorted(all_models)
+                
+                logger.warning(f"动态获取模型列表失败，使用预定义模型: {response.status_code}")
+                
+            except Exception as e:
+                logger.warning(f"动态获取模型列表异常，使用预定义模型: {e}")
+        
+        return available_models
+
 
 # 全局模型客户端实例
 _model_client = None

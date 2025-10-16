@@ -152,12 +152,31 @@ def main():
                 help="选择不同的AI模型平台进行分析"
             )
             
-            # 模型选择
+            # 模型选择 - 动态获取可用模型列表
+            try:
+                from src.utils.model_client import get_model_client
+                client = get_model_client(platform=model_platform)
+                model_options = client.get_available_models()
+                
+                if not model_options:
+                    st.warning(f"⚠️ 无法获取{model_platform}平台的模型列表，使用默认模型")
+                    # 使用配置中的默认模型作为备选
+                    if model_platform == "local":
+                        model_options = ["deepseek-r1:7b"]  # 当前只部署了7b模型
+                    else:
+                        model_options = ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"]
+            except Exception as e:
+                st.warning(f"⚠️ 获取模型列表失败: {e}")
+                # 使用配置中的默认模型作为备选
+                if model_platform == "local":
+                    model_options = ["deepseek-r1:7b"]  # 当前只部署了7b模型
+                else:
+                    model_options = ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"]
+            
+            # 设置默认模型
             if model_platform == "local":
-                model_options = ["deepseek-r1:1.5b", "deepseek-r1:7b", "deepseek-r1:14b"]
-                default_model = "deepseek-r1:1.5b"
+                default_model = "deepseek-r1:7b"  # 当前只部署了7b模型
             else:
-                model_options = ["deepseek-chat", "deepseek-coder"]
                 default_model = "deepseek-chat"
             
             selected_model = st.selectbox(

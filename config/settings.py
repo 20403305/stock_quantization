@@ -89,15 +89,17 @@ MODEL_CONFIG = {
             'name': '本地模型服务',
             'api_endpoint': os.getenv('LOCAL_MODEL_ENDPOINT', 'http://192.168.101.31:13888/api'),
             'api_key': os.getenv('LOCAL_MODEL_KEY', 'sk-8665ae17a16d4345b907ecde63d0b2ab'),
-            'default_model': os.getenv('LOCAL_DEFAULT_MODEL', 'deepseek-r1:1.5b'),
-            'enabled': True
+            'default_model': os.getenv('LOCAL_DEFAULT_MODEL', 'deepseek-r1:7b'),
+            'enabled': True,
+            'available_models': ['deepseek-r1:7b']  # 当前只部署了7b模型，后期可通过配置文件添加新模型
         },
         'deepseek': {
             'name': '深度求索平台',
             'api_endpoint': os.getenv('DEEPSEEK_API_ENDPOINT', 'https://api.deepseek.com/v1'),
             'api_key': os.getenv('DEEPSEEK_API_KEY', ''),
             'default_model': os.getenv('DEEPSEEK_DEFAULT_MODEL', 'deepseek-chat'),
-            'enabled': os.getenv('DEEPSEEK_ENABLED', 'True').lower() == 'true'
+            'enabled': os.getenv('DEEPSEEK_ENABLED', 'True').lower() == 'true',
+            'available_models': ['deepseek-chat', 'deepseek-reasoner', 'deepseek-coder']
         }
     },
     'default_platform': os.getenv('DEFAULT_MODEL_PLATFORM', 'local'),

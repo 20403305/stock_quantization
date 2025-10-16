@@ -8,6 +8,20 @@ from loguru import logger
 from typing import Optional, Dict, Any
 from config.settings import DATA_CONFIG, API_CONFIG
 
+# 创建全局数据管理器实例
+_data_manager = None
+
+def get_data_manager() -> 'DataManager':
+    """获取全局数据管理器实例"""
+    global _data_manager
+    if _data_manager is None:
+        _data_manager = DataManager()
+    return _data_manager
+
+def get_stock_name(symbol: str, provider: Optional[str] = None) -> str:
+    """获取股票名称（独立函数）"""
+    return get_data_manager().get_stock_name(symbol, provider)
+
 class DataManager:
     """数据管理器类"""
     
