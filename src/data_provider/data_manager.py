@@ -9,8 +9,233 @@ import os
 from pathlib import Path
 from datetime import datetime, timedelta
 from loguru import logger
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from config.settings import DATA_CONFIG, API_CONFIG
+
+class SmartCacheManager:
+    """智能缓存管理器 - 优化时间序列数据存储和查询"""
+    
+    def __init__(self, cache_dir: Path):
+        self.cache_dir = cache_dir / 'time_series'
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 缓存元数据文件
+        self.metadata_file = self.cache_dir / 'cache_metadata.json'
+        self.cache_expire_days = 7  # 缓存过期天数
+        
+        # 加载缓存元数据
+        self.metadata = self._load_metadata()
+    
+    def _load_metadata(self) -> Dict[str, Any]:
+        """加载缓存元数据"""
+        if not self.metadata_file.exists():
+            return {}
+        
+        try:
+            with open(self.metadata_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"加载缓存元数据失败: {e}")
+            return {}
+    
+    def _save_metadata(self) -> None:
+        """保存缓存元数据"""
+        try:
+            with open(self.metadata_file, 'w', encoding='utf-8') as f:
+                json.dump(self.metadata, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存缓存元数据失败: {e}")
+    
+    def _get_cache_file_path(self, symbol: str) -> Path:
+        """获取股票数据缓存文件路径"""
+        return self.cache_dir / f"{symbol.replace('.', '_')}.csv"
+    
+    def _parse_date_range(self, start_date: str, end_date: str) -> Tuple[datetime, datetime]:
+        """解析日期范围"""
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        return start_dt, end_dt
+    
+    def _is_cache_valid(self, symbol: str) -> bool:
+        """检查缓存是否有效（未过期）"""
+        if symbol not in self.metadata:
+            return False
+        
+        cache_info = self.metadata[symbol]
+        last_update = datetime.fromisoformat(cache_info['last_update'])
+        return (datetime.now() - last_update).days <= self.cache_expire_days
+    
+    def _get_cached_data(self, symbol: str) -> Optional[pd.DataFrame]:
+        """获取缓存的股票数据"""
+        if not self._is_cache_valid(symbol):
+            return None
+        
+        cache_file = self._get_cache_file_path(symbol)
+        if not cache_file.exists():
+            return None
+        
+        try:
+            data = pd.read_csv(cache_file, index_col='Date', parse_dates=True)
+            logger.info(f"从缓存加载 {symbol} 数据，共 {len(data)} 条记录")
+            return data
+        except Exception as e:
+            logger.warning(f"读取缓存数据失败: {e}")
+            return None
+    
+    def _save_data_to_cache(self, symbol: str, data: pd.DataFrame) -> None:
+        """保存数据到缓存"""
+        try:
+            cache_file = self._get_cache_file_path(symbol)
+            data.to_csv(cache_file)
+            
+            # 更新元数据
+            self.metadata[symbol] = {
+                'last_update': datetime.now().isoformat(),
+                'data_range': {
+                    'start': data.index.min().strftime('%Y-%m-%d'),
+                    'end': data.index.max().strftime('%Y-%m-%d')
+                },
+                'record_count': len(data)
+            }
+            self._save_metadata()
+            
+            logger.info(f"成功缓存 {symbol} 数据，共 {len(data)} 条记录")
+        except Exception as e:
+            logger.error(f"保存缓存数据失败: {e}")
+    
+    def _merge_data_ranges(self, existing_data: pd.DataFrame, new_data: pd.DataFrame) -> pd.DataFrame:
+        """合并两个数据集，处理重叠和缺失的时间范围"""
+        if existing_data is None or existing_data.empty:
+            return new_data if new_data is not None else pd.DataFrame()
+        
+        if new_data is None or new_data.empty:
+            return existing_data
+        
+        # 合并数据，新数据优先（覆盖旧数据）
+        combined_data = pd.concat([existing_data, new_data])
+        
+        # 去除重复索引（保留最后出现的记录）
+        combined_data = combined_data[~combined_data.index.duplicated(keep='last')]
+        
+        # 按日期排序
+        combined_data = combined_data.sort_index()
+        
+        return combined_data
+    
+    def _get_missing_date_ranges(self, symbol: str, start_date: str, end_date: str) -> List[Tuple[str, str]]:
+        """获取需要补充的日期范围"""
+        start_dt, end_dt = self._parse_date_range(start_date, end_date)
+        cached_data = self._get_cached_data(symbol)
+        
+        if cached_data is None or cached_data.empty:
+            return [(start_date, end_date)]
+        
+        # 获取缓存数据的日期范围
+        cache_start = cached_data.index.min()
+        cache_end = cached_data.index.max()
+        
+        missing_ranges = []
+        
+        # 检查开始日期之前的缺失范围
+        if start_dt < cache_start:
+            missing_ranges.append((start_date, (cache_start - timedelta(days=1)).strftime('%Y-%m-%d')))
+        
+        # 检查结束日期之后的缺失范围
+        if end_dt > cache_end:
+            missing_ranges.append(((cache_end + timedelta(days=1)).strftime('%Y-%m-%d'), end_date))
+        
+        return missing_ranges
+    
+    def get_data_with_cache(self, symbol: str, start_date: str, end_date: str, 
+                           data_fetcher: callable) -> pd.DataFrame:
+        """
+        智能获取数据，使用缓存优化
+        
+        Args:
+            symbol: 股票代码
+            start_date: 开始日期
+            end_date: 结束日期
+            data_fetcher: 数据获取函数
+            
+        Returns:
+            合并后的数据
+        """
+        start_dt, end_dt = self._parse_date_range(start_date, end_date)
+        
+        # 获取缓存数据
+        cached_data = self._get_cached_data(symbol)
+        
+        if cached_data is not None and not cached_data.empty:
+            # 检查缓存是否完全覆盖请求范围
+            cache_start = cached_data.index.min()
+            cache_end = cached_data.index.max()
+            
+            if cache_start <= start_dt and cache_end >= end_dt:
+                # 缓存完全覆盖请求范围，直接返回缓存数据
+                filtered_data = cached_data.loc[start_date:end_date]
+                logger.info(f"使用缓存数据完全覆盖 {symbol} {start_date} 到 {end_date}")
+                return filtered_data
+        
+        # 获取需要补充的日期范围
+        missing_ranges = self._get_missing_date_ranges(symbol, start_date, end_date)
+        
+        if not missing_ranges:
+            # 没有缺失范围，直接返回缓存数据
+            if cached_data is not None and not cached_data.empty:
+                return cached_data.loc[start_date:end_date]
+            else:
+                return pd.DataFrame()
+        
+        # 获取缺失的数据
+        new_data_list = []
+        for range_start, range_end in missing_ranges:
+            logger.info(f"获取 {symbol} 缺失数据: {range_start} 到 {range_end}")
+            missing_data = data_fetcher(symbol, range_start, range_end)
+            if missing_data is not None and not missing_data.empty:
+                new_data_list.append(missing_data)
+        
+        if new_data_list:
+            # 合并新数据
+            new_data = pd.concat(new_data_list)
+            
+            # 合并到缓存
+            updated_data = self._merge_data_ranges(cached_data, new_data)
+            
+            # 保存更新后的缓存
+            self._save_data_to_cache(symbol, updated_data)
+            
+            # 返回请求范围内的数据
+            return updated_data.loc[start_date:end_date]
+        else:
+            # 无法获取新数据，返回缓存中可用的部分
+            available_data = cached_data.loc[
+                max(cached_data.index.min(), start_dt):min(cached_data.index.max(), end_dt)
+            ]
+            logger.warning(f"无法获取缺失数据，返回缓存中的可用数据")
+            return available_data
+    
+    def clear_cache(self, symbol: Optional[str] = None) -> None:
+        """清除缓存"""
+        try:
+            if symbol:
+                # 清除指定股票的缓存
+                cache_file = self._get_cache_file_path(symbol)
+                if cache_file.exists():
+                    cache_file.unlink()
+                if symbol in self.metadata:
+                    del self.metadata[symbol]
+                logger.info(f"已清除 {symbol} 的缓存")
+            else:
+                # 清除所有缓存
+                for cache_file in self.cache_dir.glob("*.csv"):
+                    cache_file.unlink()
+                self.metadata = {}
+                logger.info("已清除所有缓存数据")
+            
+            self._save_metadata()
+        except Exception as e:
+            logger.error(f"清除缓存失败: {e}")
+
 
 # 创建全局数据管理器实例
 _data_manager = None
@@ -61,6 +286,9 @@ class DataManager:
         self.stock_list_cache_file = self.cache_dir / 'stock_list_cache.csv'
         self.company_info_cache_file = self.cache_dir / 'company_info_cache.csv'
         self.cache_expire_hours = 24  # 缓存过期时间（小时）
+        
+        # 初始化智能缓存管理器
+        self.smart_cache = SmartCacheManager(self.cache_dir)
     
     def get_stock_data(
         self, 
@@ -68,10 +296,11 @@ class DataManager:
         start_date: str, 
         end_date: str,
         provider: Optional[str] = None,
-        market_type: Optional[str] = None
+        market_type: Optional[str] = None,
+        use_cache: bool = True
     ) -> pd.DataFrame:
         """
-        获取股票数据
+        获取股票数据（支持智能缓存）
         
         Args:
             symbol: 股票代码
@@ -79,6 +308,7 @@ class DataManager:
             end_date: 结束日期  
             provider: 数据提供商
             market_type: 市场类型 ('SH'=沪指, 'SZ'=深指, None=自动识别)
+            use_cache: 是否使用智能缓存
             
         Returns:
             包含OHLCV数据的DataFrame
@@ -93,20 +323,38 @@ class DataManager:
         symbol_with_suffix = self._format_symbol(symbol, market_type)
         
         try:
-            logger.info(f"从 {provider} 获取 {symbol_with_suffix} 数据")
-            data = self.providers[provider](symbol_with_suffix, start_date, end_date)
-            
-            if not data.empty:
-                data = self._standardize_data(data)
-                logger.info(f"成功获取 {len(data)} 条数据")
-            else:
-                logger.warning(f"未获取到 {symbol_with_suffix} 的数据")
+            if use_cache:
+                # 使用智能缓存获取数据
+                def data_fetcher(sym, start, end):
+                    return self._fetch_data_directly(sym, start, end, provider)
                 
-            return data
+                data = self.smart_cache.get_data_with_cache(
+                    symbol_with_suffix, start_date, end_date, data_fetcher
+                )
+                
+                if data is not None and not data.empty:
+                    data = self._standardize_data(data)
+                    logger.info(f"智能缓存获取 {symbol_with_suffix} 数据成功，共 {len(data)} 条记录")
+                else:
+                    logger.warning(f"智能缓存未获取到 {symbol_with_suffix} 的数据")
+                    data = pd.DataFrame()
+                    
+                return data
+            else:
+                # 不使用缓存，直接获取数据
+                logger.info(f"直接获取 {symbol_with_suffix} 数据（不使用缓存）")
+                return self._fetch_data_directly(symbol_with_suffix, start_date, end_date, provider)
             
         except Exception as e:
             logger.error(f"获取数据失败: {e}")
             return pd.DataFrame()
+    
+    def _fetch_data_directly(self, symbol: str, start_date: str, end_date: str, provider: str) -> pd.DataFrame:
+        """直接获取数据（不经过缓存）"""
+        data = self.providers[provider](symbol, start_date, end_date)
+        if not data.empty:
+            data = self._standardize_data(data)
+        return data
     
     def _format_symbol(self, symbol: str, market_type: Optional[str] = None) -> str:
         """
@@ -633,66 +881,20 @@ class DataManager:
         else:
             return 'SH'  # 默认上海交易所
 
-    def _get_fallback_company_info(self, symbol):
-        """获取备用的公司信息（当API调用失败时使用）"""
-        fallback_info = {
-            '600519': {
-                'ts_code': '600519.SH',
-                'symbol': '600519',
-                'name': '贵州茅台',
-                'area': '贵州',
-                'industry': '白酒',
-                'market': '主板',
-                'list_date': '2001-08-27',
-                'main_business': '茅台酒系列产品的生产与销售',
-                'setup_date': '1999-11-20',
-                'business_scope': '茅台酒系列产品的生产与销售；饮料、食品、包装材料的生产、销售；防伪技术开发；信息产业相关产品的研制、开发等',
-                'company_intro': '贵州茅台酒股份有限公司是国内白酒行业的标志性企业，主要生产销售世界三大名酒之一的茅台酒。'
-            },
-            '000001': {
-                'ts_code': '000001.SZ',
-                'symbol': '000001',
-                'name': '平安银行',
-                'area': '深圳',
-                'industry': '银行',
-                'market': '主板',
-                'list_date': '1991-04-03',
-                'main_business': '商业银行业务',
-                'setup_date': '1987-12-22',
-                'business_scope': '商业银行业务',
-                'company_intro': '平安银行股份有限公司是中国平安保险（集团）股份有限公司控股的一家跨区域经营的股份制商业银行。'
-            },
-            '000858': {
-                'ts_code': '000858.SZ',
-                'symbol': '000858',
-                'name': '五粮液',
-                'area': '四川',
-                'industry': '白酒',
-                'market': '主板',
-                'list_date': '1998-04-27',
-                'main_business': '白酒生产和销售',
-                'setup_date': '1997-08-19',
-                'business_scope': '白酒生产和销售',
-                'company_intro': '宜宾五粮液股份有限公司是以五粮液及其系列酒的生产、销售为主要产业的上市公司。'
+    def clear_cache(self, symbol: Optional[str] = None) -> None:
+        """清除缓存数据"""
+        self.smart_cache.clear_cache(symbol)
+    
+    def get_cache_info(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """获取缓存信息"""
+        if symbol:
+            if symbol in self.smart_cache.metadata:
+                return self.smart_cache.metadata[symbol]
+            else:
+                return {}
+        else:
+            return {
+                'total_cached_symbols': len(self.smart_cache.metadata),
+                'cache_dir': str(self.smart_cache.cache_dir),
+                'metadata': self.smart_cache.metadata
             }
-        }
-        
-        clean_symbol = symbol.split('.')[0] if '.' in symbol else symbol
-        
-        if clean_symbol in fallback_info:
-            return fallback_info[clean_symbol]
-        
-        # 返回基本信息结构
-        return {
-            'ts_code': f"{clean_symbol}.{self._get_exchange_suffix(clean_symbol)}",
-            'symbol': clean_symbol,
-            'name': self.get_stock_name(symbol),
-            'area': '未知',
-            'industry': '未知',
-            'market': '主板',
-            'list_date': '未知',
-            'main_business': '未知',
-            'setup_date': '未知',
-            'business_scope': '未知',
-            'company_intro': '未知'
-        }
