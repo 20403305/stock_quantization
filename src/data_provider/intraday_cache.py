@@ -76,15 +76,14 @@ class IntradayCacheManager:
         """检查缓存是否有效"""
         metadata_key = self._get_metadata_key(symbol, trade_date)
         
-        if metadata_key not in self.metadata:
-            return False
-        
-        cache_info = self.metadata[metadata_key]
-        
         # 检查缓存文件是否存在
         cache_file = self._get_cache_file_path(symbol, trade_date)
         if not cache_file.exists():
             return False
+        
+        # 如果元数据中存在记录，进行更严格的验证
+        if metadata_key in self.metadata:
+            cache_info = self.metadata[metadata_key]
         
         # 如果是今天的数据，检查是否需要更新
         if trade_date == date.today():
@@ -161,24 +160,30 @@ class IntradayCacheManager:
             逐笔交易数据DataFrame
         """
         try:
-            # 检查缓存是否有效
-            if not self._is_cache_valid(symbol, trade_date):
-                logger.info(f"缓存无效或需要更新: {symbol} {trade_date}")
-                return None
-            
             cache_file = self._get_cache_file_path(symbol, trade_date)
             
+            # 检查缓存文件是否存在
             if not cache_file.exists():
+                logger.info(f"缓存文件不存在: {symbol} {trade_date}")
                 return None
             
             # 从缓存读取数据
             data = pd.read_parquet(cache_file)
             
+            if data.empty:
+                logger.warning(f"缓存文件为空: {symbol} {trade_date}")
+                return None
+            
             # 确保索引是datetime类型
-            if not data.empty:
-                data.index = pd.to_datetime(data.index)
-                # 按时间倒序排列（接口要求）
-                data = data.sort_index(ascending=False)
+            data.index = pd.to_datetime(data.index)
+            # 按时间倒序排列（接口要求）
+            data = data.sort_index(ascending=False)
+            
+            # 检查是否需要更新元数据
+            metadata_key = self._get_metadata_key(symbol, trade_date)
+            if metadata_key not in self.metadata:
+                # 自动重建元数据
+                self._update_metadata_from_cache(symbol, trade_date, data)
             
             logger.info(f"从缓存加载逐笔交易数据: {symbol} {trade_date}, 记录数: {len(data)}")
             return data
@@ -186,6 +191,31 @@ class IntradayCacheManager:
         except Exception as e:
             logger.error(f"读取逐笔交易缓存数据失败: {e}")
             return None
+    
+    def _update_metadata_from_cache(self, symbol: str, trade_date: date, data: pd.DataFrame) -> None:
+        """从缓存数据自动重建元数据"""
+        try:
+            cache_file = self._get_cache_file_path(symbol, trade_date)
+            metadata_key = self._get_metadata_key(symbol, trade_date)
+            
+            # 更新元数据
+            self.metadata[metadata_key] = {
+                'symbol': symbol,
+                'trade_date': trade_date.isoformat(),
+                'last_update': datetime.now().isoformat(),
+                'record_count': len(data),
+                'data_range': {
+                    'start_time': data.index.min().strftime('%H:%M:%S') if not data.empty else None,
+                    'end_time': data.index.max().strftime('%H:%M:%S') if not data.empty else None
+                },
+                'file_size': cache_file.stat().st_size if cache_file.exists() else 0
+            }
+            
+            self._save_metadata()
+            logger.info(f"自动重建元数据: {symbol} {trade_date}, 记录数: {len(data)}")
+            
+        except Exception as e:
+            logger.error(f"重建元数据失败: {e}")
     
     def get_available_dates(self, symbol: str) -> List[date]:
         """

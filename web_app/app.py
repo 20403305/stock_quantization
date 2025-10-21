@@ -349,10 +349,19 @@ def main():
             show_intraday = False
             show_basic_info = run_button
         elif function_module == "逐笔交易":
+            # 使用session state来保持逐笔交易显示状态
+            if 'show_intraday' not in st.session_state:
+                st.session_state.show_intraday = False
+            
             run_button = st.button("📊 查看逐笔交易", type="primary")
+            
+            # 如果点击了按钮，设置session state
+            if run_button:
+                st.session_state.show_intraday = True
+            
             run_backtest = False
             run_model_only = False
-            show_intraday = run_button
+            show_intraday = st.session_state.show_intraday
             show_basic_info = False
     
     # 主内容区域
@@ -389,7 +398,8 @@ def main():
             # 逐笔交易（不需要历史数据）
             if show_intraday:
                 display_intraday_trades(symbol, stock_name)
-                return  # 直接返回，不继续执行后续的分析
+                # 不要立即返回，让用户可以选择其他日期
+                # 只有当用户明确选择其他功能时才重置状态
             
             # 回测分析和AI诊股需要历史数据
             if run_backtest or run_model_only:
@@ -818,55 +828,153 @@ def display_intraday_trades(symbol, stock_name):
     connection_status = data_manager.test_mairui_connection()
     
     if not connection_status:
-        st.error("❌ 麦蕊智数API连接失败，请检查licence配置")
+        # API连接失败，但仍然可以显示缓存数据
+        st.warning("⚠️ 麦蕊智数API连接失败，将显示缓存数据")
         st.info("""
-        **配置说明:**
-        1. 在项目根目录创建 `.env` 文件
-        2. 添加麦蕊智数licence配置：`MAIRUI_LICENCE=your_licence_here`
-        3. 重新启动应用
+        **当前状态:**
+        - API连接失败，但可以查看本地缓存的历史数据
+        - 如需获取最新数据，请检查licence配置：
+          1. 在项目根目录创建 `.env` 文件
+          2. 添加麦蕊智数licence配置：`MAIRUI_LICENCE=your_licence_here`
+          3. 重新启动应用
         """)
-        return
     
     # 获取可用的历史日期
-    available_dates = get_available_intraday_dates(symbol)
+    available_dates = data_manager.get_available_intraday_dates(symbol)
+    
+    # 显示缓存信息
+    if available_dates:
+        st.success(f"✅ 发现 {len(available_dates)} 个缓存日期: {', '.join([d.strftime('%Y-%m-%d') for d in available_dates])}")
+    else:
+        st.warning("⚠️ 未发现缓存数据")
+    
+    # 根据当前时间自动判断应该显示哪个交易日的逐笔交易数据
+    current_time = datetime.now()
+    current_hour = current_time.hour
+    
+    # 当日21点前获取上一个交易日数据，21点后获取当日数据
+    if current_hour < 21:
+        # 当日21点前，显示上一个交易日数据
+        default_date = date.today() - timedelta(days=1)
+        default_date_str = default_date.strftime('%Y-%m-%d')
+        date_info = f"📅 当前时间 {current_time.strftime('%H:%M')}，显示上一个交易日 ({default_date_str}) 数据"
+        
+        # 检查API当前返回的数据日期
+        api_trade_date = date.today() - timedelta(days=1)  # 21点前API返回前一天数据
+        api_info = f"(API当前返回 {api_trade_date.strftime('%Y-%m-%d')} 的数据)"
+    else:
+        # 当日21点后，显示当日数据
+        default_date = date.today()
+        default_date_str = default_date.strftime('%Y-%m-%d')
+        date_info = f"📅 当前时间 {current_time.strftime('%H:%M')}，显示当日 ({default_date_str}) 数据"
+        
+        # 检查API当前返回的数据日期
+        api_trade_date = date.today()  # 21点后API返回当天数据
+        api_info = f"(API当前返回 {api_trade_date.strftime('%Y-%m-%d')} 的数据)"
     
     # 日期选择 - 使用下拉列表选择已存在的日期
     if available_dates:
         # 将日期转换为字符串格式用于显示
         date_options = [d.strftime('%Y-%m-%d') for d in available_dates]
         
-        # 添加今日选项（如果不在列表中）
-        today_str = date.today().strftime('%Y-%m-%d')
-        if today_str not in date_options:
-            date_options.insert(0, today_str)
+        # 添加默认日期选项（如果不在列表中）
+        if default_date_str not in date_options:
+            date_options.insert(0, default_date_str)
+        
+        # 设置默认选中项
+        default_index = date_options.index(default_date_str) if default_date_str in date_options else 0
         
         selected_date_str = st.selectbox(
             "选择交易日期",
             options=date_options,
-            index=0  # 默认选择第一个（今日或最近日期）
+            index=default_index
         )
         
         # 转换回日期对象
         selected_date = datetime.strptime(selected_date_str, '%Y-%m-%d').date()
         
         # 显示日期信息
-        st.info(f"📅 当前选择: {selected_date_str} (共 {len(available_dates)} 个历史日期)")
+        if selected_date_str == default_date_str:
+            st.info(date_info)
+        else:
+            st.info(f"📅 当前选择: {selected_date_str} (共 {len(available_dates)} 个历史日期)")
     else:
-        # 如果没有缓存数据，默认选择今日
-        selected_date = date.today()
-        st.info("📅 当前选择: 今日 (暂无历史缓存数据)")
+        # 如果没有缓存数据，使用默认日期
+        selected_date = default_date
+        st.info(date_info)
     
     with st.spinner(f"正在获取 {selected_date} 的逐笔交易数据..."):
         # 获取逐笔交易数据
-        if selected_date == date.today():
-            # 今日数据从API获取
-            trades_df = get_intraday_trades(symbol, selected_date)
+        # 根据当前时间判断API返回的数据日期
+        current_time = datetime.now()
+        current_hour = current_time.hour
+        
+        if current_hour < 21:
+            api_trade_date = date.today() - timedelta(days=1)  # 21点前API返回前一天数据
+        else:
+            api_trade_date = date.today()  # 21点后API返回当天数据
+        
+        # 显示调试信息
+        st.info(f"🔍 调试信息: 选择日期={selected_date}, API返回日期={api_trade_date}, 缓存日期={available_dates}")
+        
+        # 如果选择的日期与API当前返回的日期匹配，尝试从API获取
+        if selected_date == api_trade_date:
+            st.info("🔄 尝试从API获取数据...")
+            trades_df = data_manager.get_intraday_trades(symbol, selected_date)
         else:
             # 历史数据从缓存获取
-            trades_df = get_historical_intraday_trades(symbol, selected_date)
+            st.info("🔄 尝试从缓存获取历史数据...")
+            trades_df = data_manager.get_historical_intraday_trades(symbol, selected_date)
+        
+        # 显示数据获取结果
+        if trades_df is None:
+            st.error(f"❌ 数据获取失败: trades_df is None")
+        elif trades_df.empty:
+            st.error(f"❌ 数据获取失败: trades_df is empty")
+        else:
+            st.success(f"✅ 成功获取数据: {len(trades_df)} 条记录")
         
         if trades_df is None or trades_df.empty:
-            st.warning(f"⚠️ 未获取到 {selected_date} 的逐笔交易数据")
+            if selected_date == api_trade_date:
+                st.warning(f"⚠️ 未获取到 {selected_date} 的逐笔交易数据")
+                st.info(f"API当前返回 {api_trade_date.strftime('%Y-%m-%d')} 的数据，但获取失败")
+            else:
+                st.warning(f"⚠️ 未获取到 {selected_date} 的逐笔交易数据")
+                
+                # 检查缓存中是否有该日期的数据
+                try:
+                    cache_info = data_manager.get_intraday_cache_info(symbol)
+                    if cache_info and 'dates' in cache_info:
+                        cached_dates = cache_info['dates']
+                        st.info(f"""
+                        **缓存状态检查:**
+                        - 请求日期: {selected_date.strftime('%Y-%m-%d')}
+                        - 缓存中存在的日期: {', '.join([d.strftime('%Y-%m-%d') for d in cached_dates]) if cached_dates else '无'}
+                        - 当前API返回: {api_trade_date.strftime('%Y-%m-%d')} 的数据
+                        
+                        **解决方案:**
+                        - 确保选择的日期在缓存日期列表中
+                        - 如果缓存中没有数据，需要先在该交易日当天运行应用来缓存数据
+                        - 建议选择缓存中存在的日期查看数据
+                        """)
+                    else:
+                        st.info(f"""
+                        **历史数据获取说明:**
+                        - 历史逐笔交易数据只能从缓存中获取
+                        - 当前API返回 {api_trade_date.strftime('%Y-%m-%d')} 的数据
+                        - 如果缓存中没有 {selected_date.strftime('%Y-%m-%d')} 的数据，需要先在该交易日当天运行应用来缓存数据
+                        - 建议选择今日或最近有缓存的日期查看数据
+                        """)
+                except Exception as e:
+                    st.info(f"""
+                    **历史数据获取说明:**
+                    - 历史逐笔交易数据只能从缓存中获取
+                    - 当前API返回 {api_trade_date.strftime('%Y-%m-%d')} 的数据
+                    - 如果缓存中没有 {selected_date.strftime('%Y-%m-%d')} 的数据，需要先在该交易日当天运行应用来缓存数据
+                    - 建议选择今日或最近有缓存的日期查看数据
+                    
+                    **错误信息:** {e}
+                    """)
             return
         
         # 获取交易摘要
@@ -1096,6 +1204,13 @@ def display_intraday_trades(symbol, stock_name):
             file_name=f"{symbol}_{selected_date.strftime('%Y%m%d')}_trades.csv",
             mime="text/csv"
         )
+        
+        # 添加返回按钮
+        st.markdown("---")
+        if st.button("⬅️ 返回主界面"):
+            # 重置session state，返回主界面
+            st.session_state.show_intraday = False
+            st.rerun()
 
 if __name__ == "__main__":
     main()

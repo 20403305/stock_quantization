@@ -44,17 +44,25 @@ class MairuiDataProvider:
     
     def get_intraday_trades(self, symbol: str, trade_date: Optional[date] = None) -> Optional[pd.DataFrame]:
         """
-        获取当天逐笔交易数据（带缓存）
+        获取逐笔交易数据（带缓存）
         
         Args:
             symbol: 股票代码 (如000001)
-            trade_date: 交易日期，默认为当天
+            trade_date: 交易日期，默认为根据当前时间自动判断
             
         Returns:
             DataFrame包含逐笔交易数据
         """
         if trade_date is None:
-            trade_date = date.today()
+            # 根据当前时间自动判断交易日
+            current_time = datetime.now()
+            current_hour = current_time.hour
+            
+            # 当日21点前获取上一个交易日数据，21点后获取当日数据
+            if current_hour < 21:
+                trade_date = date.today() - timedelta(days=1)
+            else:
+                trade_date = date.today()
         
         # 格式化股票代码（去除市场前缀）
         symbol = self._format_symbol(symbol)
@@ -70,57 +78,110 @@ class MairuiDataProvider:
             logger.warning("麦蕊智数licence未配置")
             return None
         
-        # 构建API URL
-        url = f"{self.base_url}/hsrl/zbjy/{symbol}/{self.licence}"
+        # 构建API URL - 麦蕊智数API只能获取当天数据
+        # 根据当前时间判断应该获取哪个交易日的数据
+        current_time = datetime.now()
+        current_hour = current_time.hour
         
-        try:
-            logger.info(f"从API获取麦蕊智数逐笔交易数据: {symbol}, 日期: {trade_date}")
+        # 当日21点前API返回前一天数据，21点后返回当天数据
+        if current_hour < 21:
+            # 21点前，API返回的是前一天数据
+            api_trade_date = date.today() - timedelta(days=1)
+        else:
+            # 21点后，API返回的是当天数据
+            api_trade_date = date.today()
+        
+        # 只有当请求的日期与API返回的日期匹配时，才从API获取
+        if trade_date == api_trade_date:
+            url = f"{self.base_url}/hsrl/zbjy/{symbol}/{self.licence}"
             
-            response = requests.get(url, timeout=self.timeout)
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            if not data:
-                logger.warning(f"未获取到逐笔交易数据: {symbol}")
+            try:
+                logger.info(f"从API获取麦蕊智数逐笔交易数据: {symbol}, 日期: {trade_date}")
+                
+                response = requests.get(url, timeout=self.timeout)
+                response.raise_for_status()
+                
+                data = response.json()
+                
+                if not data:
+                    logger.warning(f"未获取到逐笔交易数据: {symbol}")
+                    # API返回空数据，尝试从缓存获取
+                    cached_data = self.cache_manager.get_intraday_data(symbol, trade_date)
+                    if cached_data is not None:
+                        logger.info(f"API返回空数据，从缓存获取: {symbol}, 日期: {trade_date}")
+                        return cached_data
+                    return None
+                
+                # 转换为DataFrame
+                df = pd.DataFrame(data)
+                
+                # 数据清洗和类型转换
+                if not df.empty:
+                    # 转换日期和时间格式
+                    df['datetime'] = pd.to_datetime(df['d'] + ' ' + df['t'])
+                    df['volume'] = df['v'].astype(int)  # 成交量
+                    df['price'] = df['p'].astype(float)  # 成交价
+                    df['timestamp'] = df['ts'].astype(int)  # 时间戳
+                    
+                    # 设置索引
+                    df.set_index('datetime', inplace=True)
+                    
+                    # 按时间正序排列
+                    df.sort_index(ascending=True, inplace=True)
+                    
+                    # 计算累计成交额
+                    df['amount'] = df['volume'] * df['price']
+                    df['cum_amount'] = df['amount'].cumsum()
+                    df['cum_volume'] = df['volume'].cumsum()
+                    
+                    # 保存到缓存
+                    self.cache_manager.save_intraday_data(symbol, trade_date, df)
+                    
+                    logger.info(f"成功获取并缓存逐笔交易数据: {symbol}, 数据量: {len(df)}")
+                    return df
+                else:
+                    # DataFrame为空，尝试从缓存获取
+                    cached_data = self.cache_manager.get_intraday_data(symbol, trade_date)
+                    if cached_data is not None:
+                        logger.info(f"API返回空DataFrame，从缓存获取: {symbol}, 日期: {trade_date}")
+                        return cached_data
+                    return None
+                
+            except requests.exceptions.RequestException as e:
+                logger.error(f"请求麦蕊智数API失败: {e}")
+                # API调用失败，尝试从缓存获取
+                cached_data = self.cache_manager.get_intraday_data(symbol, trade_date)
+                if cached_data is not None:
+                    logger.info(f"API调用失败，从缓存获取: {symbol}, 日期: {trade_date}")
+                    return cached_data
                 return None
-            
-            # 转换为DataFrame
-            df = pd.DataFrame(data)
-            
-            # 数据清洗和类型转换
-            if not df.empty:
-                # 转换日期和时间格式
-                df['datetime'] = pd.to_datetime(df['d'] + ' ' + df['t'])
-                df['volume'] = df['v'].astype(int)  # 成交量
-                df['price'] = df['p'].astype(float)  # 成交价
-                df['timestamp'] = df['ts'].astype(int)  # 时间戳
                 
-                # 设置索引
-                df.set_index('datetime', inplace=True)
+            except json.JSONDecodeError as e:
+                logger.error(f"解析JSON响应失败: {e}")
+                # JSON解析失败，尝试从缓存获取
+                cached_data = self.cache_manager.get_intraday_data(symbol, trade_date)
+                if cached_data is not None:
+                    logger.info(f"JSON解析失败，从缓存获取: {symbol}, 日期: {trade_date}")
+                    return cached_data
+                return None
                 
-                # 按时间正序排列
-                df.sort_index(ascending=True, inplace=True)
-                
-                # 计算累计成交额
-                df['amount'] = df['volume'] * df['price']
-                df['cum_amount'] = df['amount'].cumsum()
-                df['cum_volume'] = df['volume'].cumsum()
-                
-                # 保存到缓存
-                self.cache_manager.save_intraday_data(symbol, trade_date, df)
-                
-                logger.info(f"成功获取并缓存逐笔交易数据: {symbol}, 数据量: {len(df)}")
-                return df
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"请求麦蕊智数API失败: {e}")
-        except json.JSONDecodeError as e:
-            logger.error(f"解析JSON响应失败: {e}")
-        except Exception as e:
-            logger.error(f"获取逐笔交易数据异常: {e}")
-        
-        return None
+            except Exception as e:
+                logger.error(f"获取逐笔交易数据异常: {e}")
+                # 其他异常，尝试从缓存获取
+                cached_data = self.cache_manager.get_intraday_data(symbol, trade_date)
+                if cached_data is not None:
+                    logger.info(f"获取数据异常，从缓存获取: {symbol}, 日期: {trade_date}")
+                    return cached_data
+                return None
+        else:
+            # 请求的日期与API返回的日期不匹配，只能从缓存获取
+            logger.warning(f"无法从API获取历史逐笔交易数据: {symbol}, 日期: {trade_date} (API当前返回 {api_trade_date} 的数据)")
+            # 再次尝试从缓存获取（可能之前缓存过）
+            cached_data = self.cache_manager.get_intraday_data(symbol, trade_date)
+            if cached_data is not None:
+                logger.info(f"历史数据从缓存获取: {symbol}, 日期: {trade_date}")
+                return cached_data
+            return None
     
     def get_trade_summary(self, symbol: str, trade_date: Optional[date] = None) -> Optional[Dict[str, Any]]:
         """
