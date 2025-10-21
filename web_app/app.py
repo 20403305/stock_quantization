@@ -175,54 +175,76 @@ def main():
                 except:
                     stock_name = symbol
         
-        # 日期选择
-        st.subheader("时间范围")
-        col1, col2 = st.columns(2)
-        with col1:
-            start_date = st.date_input(
-                "开始日期", 
-                value=datetime.now() - timedelta(days=365),
-                max_value=datetime.now()
-            )
-        with col2:
-            end_date = st.date_input(
-                "结束日期", 
-                value=datetime.now(),
-                max_value=datetime.now()
-            )
-        
-        # 策略选择
-        st.subheader("策略选择")
-        strategy_name = st.selectbox(
-            "选择策略",
-            ["移动平均策略", "RSI策略", "MACD策略"]
+        # 功能模块选择
+        st.subheader("功能模块")
+        function_module = st.radio(
+            "选择分析功能",
+            ["回测分析", "AI诊股", "基本信息", "逐笔交易"],
+            help="选择不同的分析功能模块"
         )
         
-        # 策略参数
-        st.subheader("策略参数")
-        strategy_params = {}
-        
-        if strategy_name == "移动平均策略":
-            strategy_params['short_period'] = st.slider("短期均线", 3, 20, 5)  
-            strategy_params['long_period'] = st.slider("长期均线", 10, 50, 20)
+        # 回测分析参数（仅在选择回测分析时显示）
+        if function_module == "回测分析":
+            st.subheader("📈 回测参数")
             
-        elif strategy_name == "RSI策略":
-            strategy_params['period'] = st.slider("RSI周期", 5, 30, 14)
-            strategy_params['overbought'] = st.slider("超买线", 60, 90, 70)
-            strategy_params['oversold'] = st.slider("超卖线", 10, 40, 30)
+            # 时间范围
+            st.write("时间范围")
+            col1, col2 = st.columns(2)
+            with col1:
+                start_date = st.date_input(
+                    "开始日期", 
+                    value=datetime.now() - timedelta(days=365),
+                    max_value=datetime.now()
+                )
+            with col2:
+                end_date = st.date_input(
+                    "结束日期", 
+                    value=datetime.now(),
+                    max_value=datetime.now()
+                )
             
-        elif strategy_name == "MACD策略":
-            strategy_params['fast_period'] = st.slider("快线周期", 5, 20, 12)
-            strategy_params['slow_period'] = st.slider("慢线周期", 15, 40, 26)
-            strategy_params['signal_period'] = st.slider("信号线周期", 5, 15, 9)
+            # 策略选择
+            st.write("策略选择")
+            strategy_name = st.selectbox(
+                "选择策略",
+                ["移动平均策略", "RSI策略", "MACD策略"]
+            )
+            
+            # 策略参数
+            st.write("策略参数")
+            strategy_params = {}
+            
+            if strategy_name == "移动平均策略":
+                strategy_params['short_period'] = st.slider("短期均线", 3, 20, 5)  
+                strategy_params['long_period'] = st.slider("长期均线", 10, 50, 20)
+                
+            elif strategy_name == "RSI策略":
+                strategy_params['period'] = st.slider("RSI周期", 5, 30, 14)
+                strategy_params['overbought'] = st.slider("超买线", 60, 90, 70)
+                strategy_params['oversold'] = st.slider("超卖线", 10, 40, 30)
+                
+            elif strategy_name == "MACD策略":
+                strategy_params['fast_period'] = st.slider("快线周期", 5, 20, 12)
+                strategy_params['slow_period'] = st.slider("慢线周期", 15, 40, 26)
+                strategy_params['signal_period'] = st.slider("信号线周期", 5, 15, 9)
+            
+            # 为回测分析设置默认值
+            enable_model_analysis = False
+            model_platform = "local"
+            selected_model = "deepseek-r1:7b"
         
-        # 模型分析选项
-        st.subheader("🤖 AI模型分析")
-        enable_model_analysis = st.checkbox("启用AI模型分析", value=True)
-        
-        if enable_model_analysis:
+        # AI诊股参数（仅在选择AI诊股时显示）
+        elif function_module == "AI诊股":
+            st.subheader("🤖 AI诊股参数")
+            
+            # 时间范围（简化版）
+            st.write("分析周期")
+            analysis_days = st.slider("分析天数", 30, 365, 180)
+            start_date = datetime.now() - timedelta(days=analysis_days)
+            end_date = datetime.now()
+            
             # 模型平台选择
-            st.subheader("模型平台")
+            st.write("模型平台")
             model_platform = st.selectbox(
                 "选择AI模型平台",
                 ["local", "deepseek", "alibaba", "siliconflow", "tencent", "modelscope", "zhipu"],
@@ -288,18 +310,53 @@ def main():
                 index=model_options.index(default_model) if default_model in model_options else 0,
                 help="选择具体的AI模型进行分析"
             )
+            
+            # 为AI诊股设置默认策略参数
+            strategy_name = "移动平均策略"
+            strategy_params = {'short_period': 5, 'long_period': 20}
+            enable_model_analysis = True
+        
+        # 基本信息和逐笔交易不需要额外参数
+        else:
+            # 设置默认值
+            start_date = datetime.now() - timedelta(days=365)
+            end_date = datetime.now()
+            strategy_name = "移动平均策略"
+            strategy_params = {}
+            enable_model_analysis = False
+            model_platform = "local"
+            selected_model = "deepseek-r1:7b"
         
         # 运行按钮
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            run_backtest = st.button("🚀 运行回测", type="primary")
-        with col2:
-            run_model_only = st.button("🧠 仅运行模型分析")
-        with col3:
-            show_intraday = st.button("📊 查看逐笔交易")
+        st.subheader("执行操作")
+        
+        if function_module == "回测分析":
+            run_button = st.button("🚀 运行回测分析", type="primary")
+            run_backtest = run_button
+            run_model_only = False
+            show_intraday = False
+            show_basic_info = False
+        elif function_module == "AI诊股":
+            run_button = st.button("🧠 运行AI诊股", type="primary")
+            run_backtest = False
+            run_model_only = run_button
+            show_intraday = False
+            show_basic_info = False
+        elif function_module == "基本信息":
+            run_button = st.button("🏢 查看基本信息", type="primary")
+            run_backtest = False
+            run_model_only = False
+            show_intraday = False
+            show_basic_info = run_button
+        elif function_module == "逐笔交易":
+            run_button = st.button("📊 查看逐笔交易", type="primary")
+            run_backtest = False
+            run_model_only = False
+            show_intraday = run_button
+            show_basic_info = False
     
     # 主内容区域
-    if run_backtest or run_model_only or show_intraday:
+    if run_backtest or run_model_only or show_intraday or show_basic_info:
         # 确保变量已定义
         if 'symbol' not in locals():
             symbol = "600519"  # 默认股票代码
@@ -314,77 +371,85 @@ def main():
             selected_model = "deepseek-r1:7b"
             
         with st.spinner("正在获取数据和运行分析..."):
-            # 获取数据
-            data = load_stock_data(symbol, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), data_provider)
-            
             # 获取股票名称
             stock_name = get_stock_name(symbol, data_provider)
             
-            if data.empty:
-                st.error("❌ 无法获取数据，请检查股票代码或日期范围")
-                return
-            
-            # 获取上市公司基本信息
-            try:
-                company_info = cached_get_company_info(symbol, data_provider)
-                if company_info:
-                    display_company_info(company_info)
-            except Exception as e:
-                st.warning(f"⚠️ 获取上市公司信息失败: {e}")
-            
-            # 运行模型分析
-            if enable_model_analysis or run_model_only:
+            # 显示基本信息（所有功能都显示）
+            if show_basic_info:
                 try:
-                    # 确定模型平台和模型名称
-                    model_platform_to_use = model_platform if enable_model_analysis else 'local'
-                    model_name_to_use = selected_model if enable_model_analysis else 'deepseek-r1:7b'
-                    
-                    # 使用缓存的模型分析函数
-                    model_results = run_model_analysis(
-                        symbol, 
-                        data, 
-                        start_date.strftime('%Y-%m-%d'),
-                        model_platform_to_use,
-                        model_name_to_use
-                    )
-                    
-                    if model_results['model_analysis']['success']:
-                        st.success("✅ AI模型分析完成")
-                        # 仅在仅运行模型分析时显示模型分析结果
-                        if run_model_only:
-                            # 添加股票名称到模型结果中
-                            model_results['stock_name'] = stock_name
-                            display_model_analysis(model_results)
+                    company_info = cached_get_company_info(symbol, data_provider)
+                    if company_info:
+                        display_company_info(company_info)
                     else:
-                        st.error(f"❌ 模型分析失败: {model_results['model_analysis'].get('error', '未知错误')}")
+                        st.warning("⚠️ 未获取到上市公司基本信息")
                 except Exception as e:
-                    st.error(f"❌ 模型分析异常: {e}")
+                    st.warning(f"⚠️ 获取上市公司信息失败: {e}")
+                return  # 基本信息显示完成后直接返回
             
-            # 运行回测（如果不是仅运行模型分析）
-            if run_backtest and not run_model_only:
-                results = run_strategy_backtest(data, strategy_name, **strategy_params)
-                
-                if not results:
-                    st.error("❌ 回测运行失败")
-                    return
-                
-                # 显示结果 - 先显示回测结果，再显示模型分析
-                display_results(data, results, symbol, strategy_name, stock_name)
-                
-                # 如果启用了模型分析，单独显示模型分析报告
-                if enable_model_analysis:
-                    try:
-                        if 'model_results' in locals() and model_results:
-                            # 添加股票名称到模型结果中
-                            model_results['stock_name'] = stock_name
-                            display_model_analysis(model_results)
-                    except NameError:
-                        pass
-            
-            # 显示逐笔交易数据（不运行AI模型分析）
+            # 逐笔交易（不需要历史数据）
             if show_intraday:
                 display_intraday_trades(symbol, stock_name)
-                return  # 直接返回，不继续执行后续的回测和模型分析
+                return  # 直接返回，不继续执行后续的分析
+            
+            # 回测分析和AI诊股需要历史数据
+            if run_backtest or run_model_only:
+                # 获取数据
+                data = load_stock_data(symbol, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), data_provider)
+                
+                if data.empty:
+                    st.error("❌ 无法获取数据，请检查股票代码或日期范围")
+                    return
+                
+                # 显示基本信息（回测和AI诊股都显示）
+                try:
+                    company_info = cached_get_company_info(symbol, data_provider)
+                    if company_info:
+                        display_company_info(company_info)
+                except Exception as e:
+                    st.warning(f"⚠️ 获取上市公司信息失败: {e}")
+                
+                # AI诊股功能
+                if run_model_only:
+                    try:
+                        # 使用缓存的模型分析函数
+                        model_results = run_model_analysis(
+                            symbol, 
+                            data, 
+                            start_date.strftime('%Y-%m-%d'),
+                            model_platform,
+                            selected_model
+                        )
+                        
+                        if model_results['model_analysis']['success']:
+                            st.success("✅ AI模型分析完成")
+                            # 添加股票名称到模型结果中
+                            model_results['stock_name'] = stock_name
+                            display_model_analysis(model_results)
+                        else:
+                            st.error(f"❌ 模型分析失败: {model_results['model_analysis'].get('error', '未知错误')}")
+                    except Exception as e:
+                        st.error(f"❌ 模型分析异常: {e}")
+                
+                # 回测分析功能
+                if run_backtest:
+                    results = run_strategy_backtest(data, strategy_name, **strategy_params)
+                    
+                    if not results:
+                        st.error("❌ 回测运行失败")
+                        return
+                    
+                    # 显示回测结果
+                    display_results(data, results, symbol, strategy_name, stock_name)
+                    
+                    # 如果启用了模型分析，单独显示模型分析报告
+                    if enable_model_analysis:
+                        try:
+                            if 'model_results' in locals() and model_results:
+                                # 添加股票名称到模型结果中
+                                model_results['stock_name'] = stock_name
+                                display_model_analysis(model_results)
+                        except NameError:
+                            pass
     
     else:
         # 默认显示
@@ -858,6 +923,30 @@ def display_intraday_trades(symbol, stock_name):
         # 显示逐笔交易数据表格
         st.subheader("📝 逐笔交易明细")
         
+        # 添加交易状态标注
+        def get_trade_status(ts_value):
+            """根据ts字段值获取交易状态"""
+            if ts_value == 0:
+                return "集合竞价"
+            elif ts_value == 1:
+                return "价格上升"
+            elif ts_value == 2:
+                return "价格下跌"
+            else:
+                return "未知状态"
+        
+        # 添加成交量变化标注
+        def get_volume_change(current_volume, previous_volume):
+            """根据成交量变化获取变化状态"""
+            if pd.isna(previous_volume):
+                return "首笔"
+            elif current_volume > previous_volume:
+                return "成交量上升"
+            elif current_volume < previous_volume:
+                return "成交量下降"
+            else:
+                return "成交量不变"
+        
         # 格式化显示数据
         display_df = trades_df.copy()
         display_df['price'] = display_df['price'].apply(lambda x: f"¥{x:.2f}")
@@ -866,14 +955,27 @@ def display_intraday_trades(symbol, stock_name):
         display_df['cum_amount'] = display_df['cum_amount'].apply(lambda x: f"¥{x:,.0f}")
         display_df['cum_volume'] = display_df['cum_volume'].apply(lambda x: f"{x:,}")
         
+        # 添加交易状态列
+        display_df['trade_status'] = display_df['timestamp'].apply(get_trade_status)
+        
+        # 添加成交量变化列
+        display_df['volume_change'] = ""
+        for i in range(len(display_df)):
+            if i == 0:
+                display_df.iloc[i, display_df.columns.get_loc('volume_change')] = "首笔"
+            else:
+                current_volume = display_df.iloc[i]['volume']
+                previous_volume = display_df.iloc[i-1]['volume']
+                display_df.iloc[i, display_df.columns.get_loc('volume_change')] = get_volume_change(current_volume, previous_volume)
+        
         # 重置索引以显示时间
         display_df.reset_index(inplace=True)
         display_df['datetime'] = display_df['datetime'].dt.strftime('%H:%M:%S')
         
         # 选择显示的列
-        display_columns = ['datetime', 'price', 'volume', 'amount', 'cum_volume', 'cum_amount']
+        display_columns = ['datetime', 'price', 'volume', 'amount', 'trade_status', 'volume_change', 'cum_volume', 'cum_amount']
         display_df = display_df[display_columns]
-        display_df.columns = ['时间', '价格', '成交量', '成交额', '累计成交量', '累计成交额']
+        display_df.columns = ['时间', '价格', '成交量', '成交额', '交易状态', '成交量变化', '累计成交量', '累计成交额']
         
         st.dataframe(display_df, width='stretch', height=400)
         
@@ -909,6 +1011,78 @@ def display_intraday_trades(symbol, stock_name):
         fig.update_yaxes(title_text="成交量(股)", row=2, col=1)
         
         st.plotly_chart(fig, width='stretch')
+        
+        # 新增价格-成交量分布图
+        st.subheader("📊 价格-成交量分布图")
+        
+        # 创建价格-成交量分布图
+        fig_dist = go.Figure()
+        
+        # 按价格分组统计成交量
+        price_bins = pd.cut(trades_df['price'], bins=20)
+        volume_by_price = trades_df.groupby(price_bins)['volume'].sum().reset_index()
+        volume_by_price['price_mid'] = volume_by_price['price'].apply(lambda x: x.mid)
+        
+        # 添加散点图显示分布
+        fig_dist.add_trace(
+            go.Scatter(
+                x=trades_df['price'],
+                y=trades_df['volume'],
+                mode='markers',
+                name='单笔交易',
+                marker=dict(
+                    size=5,
+                    color='rgba(255, 100, 100, 0.6)',
+                    line=dict(width=1, color='rgba(255, 100, 100, 0.8)')
+                ),
+                hovertemplate='价格: ¥%{x:.2f}<br>成交量: %{y:,}股<extra></extra>'
+            )
+        )
+        
+        # 添加成交量分布曲线
+        fig_dist.add_trace(
+            go.Scatter(
+                x=volume_by_price['price_mid'],
+                y=volume_by_price['volume'],
+                mode='lines+markers',
+                name='成交量分布',
+                line=dict(color='blue', width=3),
+                marker=dict(size=8, color='blue'),
+                hovertemplate='价格区间: ¥%{x:.2f}<br>总成交量: %{y:,}股<extra></extra>'
+            )
+        )
+        
+        fig_dist.update_layout(
+            height=500,
+            title="价格-成交量分布关系",
+            xaxis_title="价格(元)",
+            yaxis_title="成交量(股)",
+            showlegend=True,
+            hovermode='closest'
+        )
+        
+        st.plotly_chart(fig_dist, width='stretch')
+        
+        # 显示分布统计信息
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric(
+                label="价格区间",
+                value=f"¥{trades_df['price'].min():.2f} - ¥{trades_df['price'].max():.2f}"
+            )
+        
+        with col2:
+            st.metric(
+                label="平均价格",
+                value=f"¥{trades_df['price'].mean():.2f}"
+            )
+        
+        with col3:
+            st.metric(
+                label="成交量集中度",
+                value=f"{(trades_df['volume'].sum() / len(trades_df)):,.0f}股/笔"
+            )
         
         # 显示数据下载选项
         st.subheader("💾 数据导出")
