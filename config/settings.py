@@ -20,6 +20,7 @@ DATA_CONFIG = {
     'default_provider': 'tushare',
     'cache_enabled': True,
     'cache_expire': 3600,  # 缓存过期时间(秒)
+    'intraday_cache_expire_days': -1,  # 逐笔交易缓存过期天数，-1表示永不过期
 }
 
 # 数据库配置
@@ -78,6 +79,7 @@ WEB_CONFIG = {
 API_CONFIG = {
     'tushare_token': os.getenv('TUSHARE_TOKEN', ''),
     'alpha_vantage_key': os.getenv('ALPHA_VANTAGE_KEY', ''),
+    'mairui_licence': os.getenv('MAIRUI_LICENCE', ''),
     'request_timeout': 30,
     'retry_times': 3,
 }

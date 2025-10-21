@@ -7,10 +7,28 @@ import yfinance as yf
 import json
 import os
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from loguru import logger
 from typing import Optional, Dict, Any, List, Tuple
 from config.settings import DATA_CONFIG, API_CONFIG
+
+# 导入麦蕊智数数据提供器
+try:
+    from .mairui_provider import MairuiDataProvider
+except ImportError:
+    # 如果导入失败，创建一个空的占位类
+    class MairuiDataProvider:
+        def __init__(self):
+            pass
+        
+        def get_intraday_trades(self, symbol, trade_date=None):
+            return None
+        
+        def get_trade_summary(self, symbol, trade_date=None):
+            return None
+        
+        def test_connection(self):
+            return False
 
 class SmartCacheManager:
     """智能缓存管理器 - 优化时间序列数据存储和查询"""
@@ -289,6 +307,9 @@ class DataManager:
         
         # 初始化智能缓存管理器
         self.smart_cache = SmartCacheManager(self.cache_dir)
+        
+        # 初始化麦蕊智数数据提供器
+        self.mairui_provider = MairuiDataProvider()
     
     def get_stock_data(
         self, 
@@ -898,3 +919,95 @@ class DataManager:
                 'cache_dir': str(self.smart_cache.cache_dir),
                 'metadata': self.smart_cache.metadata
             }
+    
+    def get_intraday_trades(self, symbol: str, trade_date: Optional[date] = None) -> Optional[pd.DataFrame]:
+        """
+        获取当天逐笔交易数据（麦蕊智数API）
+        
+        Args:
+            symbol: 股票代码
+            trade_date: 交易日期，默认为当天
+            
+        Returns:
+            DataFrame包含逐笔交易数据
+        """
+        return self.mairui_provider.get_intraday_trades(symbol, trade_date)
+    
+    def get_trade_summary(self, symbol: str, trade_date: Optional[date] = None) -> Optional[Dict[str, Any]]:
+        """
+        获取逐笔交易数据摘要统计（麦蕊智数API）
+        
+        Args:
+            symbol: 股票代码
+            trade_date: 交易日期
+            
+        Returns:
+            交易摘要统计信息
+        """
+        return self.mairui_provider.get_trade_summary(symbol, trade_date)
+    
+    def test_mairui_connection(self) -> bool:
+        """测试麦蕊智数API连接"""
+        return self.mairui_provider.test_connection()
+    
+    def get_historical_intraday_trades(self, symbol: str, trade_date: date) -> Optional[pd.DataFrame]:
+        """
+        获取历史逐笔交易数据（仅从缓存读取）
+        
+        Args:
+            symbol: 股票代码
+            trade_date: 交易日期
+            
+        Returns:
+            历史逐笔交易数据
+        """
+        return self.mairui_provider.get_historical_trades(symbol, trade_date)
+    
+    def get_available_intraday_dates(self, symbol: str) -> List[date]:
+        """
+        获取某只股票可用的历史日期列表
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            可用的日期列表
+        """
+        return self.mairui_provider.get_available_dates(symbol)
+    
+    def get_intraday_cache_info(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """
+        获取逐笔交易缓存信息
+        
+        Args:
+            symbol: 股票代码（可选）
+            
+        Returns:
+            缓存信息
+        """
+        return self.mairui_provider.get_cache_info(symbol)
+    
+    def clear_intraday_cache(self, symbol: Optional[str] = None, trade_date: Optional[date] = None) -> bool:
+        """
+        清除逐笔交易缓存
+        
+        Args:
+            symbol: 股票代码（可选）
+            trade_date: 交易日期（可选）
+            
+        Returns:
+            是否清除成功
+        """
+        return self.mairui_provider.clear_cache(symbol, trade_date)
+    
+    def cleanup_old_intraday_data(self, days_to_keep: int = 30) -> int:
+        """
+        清理过期逐笔交易数据
+        
+        Args:
+            days_to_keep: 保留天数
+            
+        Returns:
+            清理的文件数量
+        """
+        return self.mairui_provider.cleanup_old_data(days_to_keep)

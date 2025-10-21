@@ -10,7 +10,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 from src.data_provider.data_manager import DataManager, get_stock_name, search_stock, get_stock_mapping, get_company_info
 from src.strategy.ma_strategy import MAStrategy
@@ -81,6 +81,30 @@ def run_model_analysis(symbol, data, start_date, model_platform, model_name):
         model_platform=model_platform,
         model_name=model_name
     )
+
+@st.cache_data
+def get_intraday_trades(symbol, trade_date=None):
+    """获取逐笔交易数据（带缓存）"""
+    data_manager = DataManager()
+    return data_manager.get_intraday_trades(symbol, trade_date)
+
+@st.cache_data
+def get_trade_summary(symbol, trade_date=None):
+    """获取交易摘要（带缓存）"""
+    data_manager = DataManager()
+    return data_manager.get_trade_summary(symbol, trade_date)
+
+@st.cache_data
+def get_historical_intraday_trades(symbol, trade_date):
+    """获取历史逐笔交易数据（带缓存）"""
+    data_manager = DataManager()
+    return data_manager.get_historical_intraday_trades(symbol, trade_date)
+
+@st.cache_data
+def get_available_intraday_dates(symbol):
+    """获取可用的历史日期列表（带缓存）"""
+    data_manager = DataManager()
+    return data_manager.get_available_intraday_dates(symbol)
 
 def main():
     """主函数"""
@@ -266,14 +290,16 @@ def main():
             )
         
         # 运行按钮
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             run_backtest = st.button("🚀 运行回测", type="primary")
         with col2:
             run_model_only = st.button("🧠 仅运行模型分析")
+        with col3:
+            show_intraday = st.button("📊 查看逐笔交易")
     
     # 主内容区域
-    if run_backtest or run_model_only:
+    if run_backtest or run_model_only or show_intraday:
         # 确保变量已定义
         if 'symbol' not in locals():
             symbol = "600519"  # 默认股票代码
@@ -354,6 +380,11 @@ def main():
                             display_model_analysis(model_results)
                     except NameError:
                         pass
+            
+            # 显示逐笔交易数据（不运行AI模型分析）
+            if show_intraday:
+                display_intraday_trades(symbol, stock_name)
+                return  # 直接返回，不继续执行后续的回测和模型分析
     
     else:
         # 默认显示
@@ -695,6 +726,202 @@ def display_model_analysis(model_results):
         
         **建议操作:** 请结合AI分析报告和技术指标进行决策
         """)
+
+def _format_amount(amount: float) -> str:
+    """
+    格式化金额，使用中文单位
+    
+    Args:
+        amount: 金额数值
+        
+    Returns:
+        格式化后的金额字符串
+    """
+    if amount >= 1e8:  # 1亿以上
+        return f"{amount/1e8:.2f}亿"
+    elif amount >= 1e4:  # 1万以上
+        return f"{amount/1e4:.2f}万"
+    else:
+        return f"{amount:.0f}"
+
+def display_intraday_trades(symbol, stock_name):
+    """显示逐笔交易数据"""
+    st.header(f"📊 {symbol} ({stock_name}) - 逐笔交易数据")
+    
+    # 测试麦蕊智数连接
+    data_manager = DataManager()
+    connection_status = data_manager.test_mairui_connection()
+    
+    if not connection_status:
+        st.error("❌ 麦蕊智数API连接失败，请检查licence配置")
+        st.info("""
+        **配置说明:**
+        1. 在项目根目录创建 `.env` 文件
+        2. 添加麦蕊智数licence配置：`MAIRUI_LICENCE=your_licence_here`
+        3. 重新启动应用
+        """)
+        return
+    
+    # 获取可用的历史日期
+    available_dates = get_available_intraday_dates(symbol)
+    
+    # 日期选择 - 使用下拉列表选择已存在的日期
+    if available_dates:
+        # 将日期转换为字符串格式用于显示
+        date_options = [d.strftime('%Y-%m-%d') for d in available_dates]
+        
+        # 添加今日选项（如果不在列表中）
+        today_str = date.today().strftime('%Y-%m-%d')
+        if today_str not in date_options:
+            date_options.insert(0, today_str)
+        
+        selected_date_str = st.selectbox(
+            "选择交易日期",
+            options=date_options,
+            index=0  # 默认选择第一个（今日或最近日期）
+        )
+        
+        # 转换回日期对象
+        selected_date = datetime.strptime(selected_date_str, '%Y-%m-%d').date()
+        
+        # 显示日期信息
+        st.info(f"📅 当前选择: {selected_date_str} (共 {len(available_dates)} 个历史日期)")
+    else:
+        # 如果没有缓存数据，默认选择今日
+        selected_date = date.today()
+        st.info("📅 当前选择: 今日 (暂无历史缓存数据)")
+    
+    with st.spinner(f"正在获取 {selected_date} 的逐笔交易数据..."):
+        # 获取逐笔交易数据
+        if selected_date == date.today():
+            # 今日数据从API获取
+            trades_df = get_intraday_trades(symbol, selected_date)
+        else:
+            # 历史数据从缓存获取
+            trades_df = get_historical_intraday_trades(symbol, selected_date)
+        
+        if trades_df is None or trades_df.empty:
+            st.warning(f"⚠️ 未获取到 {selected_date} 的逐笔交易数据")
+            return
+        
+        # 获取交易摘要
+        summary = get_trade_summary(symbol, selected_date)
+        
+        # 显示交易摘要
+        if summary:
+            st.subheader("📋 交易摘要")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    label="总交易笔数",
+                    value=f"{summary['total_trades']:,}"
+                )
+            
+            with col2:
+                st.metric(
+                    label="总成交量",
+                    value=f"{summary['total_volume']:,}"
+                )
+            
+            with col3:
+                # 格式化成交额，使用中文单位
+                amount_str = _format_amount(summary['total_amount'])
+                st.metric(
+                    label="总成交额",
+                    value=f"¥{amount_str}"
+                )
+            
+            with col4:
+                st.metric(
+                    label="平均价格",
+                    value=f"¥{summary['avg_price']:.2f}"
+                )
+            
+            # 详细统计
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**价格区间:**")
+                st.write(f"最高价: ¥{summary['max_price']:.2f}")
+                st.write(f"最低价: ¥{summary['min_price']:.2f}")
+                st.write(f"交易时间: {summary['first_trade_time']} - {summary['last_trade_time']}")
+                st.write(f"交易时长: {summary['trade_duration']}")
+            
+            with col2:
+                st.write("**成交量分布:**")
+                st.write(f"小单(<1000股): {summary['volume_distribution']['small']}笔")
+                st.write(f"中单(1000-10000股): {summary['volume_distribution']['medium']}笔")
+                st.write(f"大单(≥10000股): {summary['volume_distribution']['large']}笔")
+        
+        # 显示逐笔交易数据表格
+        st.subheader("📝 逐笔交易明细")
+        
+        # 格式化显示数据
+        display_df = trades_df.copy()
+        display_df['price'] = display_df['price'].apply(lambda x: f"¥{x:.2f}")
+        display_df['volume'] = display_df['volume'].apply(lambda x: f"{x:,}")
+        display_df['amount'] = display_df['amount'].apply(lambda x: f"¥{x:,.0f}")
+        display_df['cum_amount'] = display_df['cum_amount'].apply(lambda x: f"¥{x:,.0f}")
+        display_df['cum_volume'] = display_df['cum_volume'].apply(lambda x: f"{x:,}")
+        
+        # 重置索引以显示时间
+        display_df.reset_index(inplace=True)
+        display_df['datetime'] = display_df['datetime'].dt.strftime('%H:%M:%S')
+        
+        # 选择显示的列
+        display_columns = ['datetime', 'price', 'volume', 'amount', 'cum_volume', 'cum_amount']
+        display_df = display_df[display_columns]
+        display_df.columns = ['时间', '价格', '成交量', '成交额', '累计成交量', '累计成交额']
+        
+        st.dataframe(display_df, width='stretch', height=400)
+        
+        # 显示交易图表
+        st.subheader("📈 交易走势图")
+        
+        # 创建子图
+        fig = make_subplots(
+            rows=2, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.1,
+            subplot_titles=('价格走势', '成交量'),
+            row_heights=[0.6, 0.4]
+        )
+        
+        # 价格走势
+        fig.add_trace(
+            go.Scatter(x=trades_df.index, y=trades_df['price'],
+                      name='成交价格', line=dict(color='blue')),
+            row=1, col=1
+        )
+        
+        # 成交量（柱状图）
+        fig.add_trace(
+            go.Bar(x=trades_df.index, y=trades_df['volume'],
+                   name='成交量', marker=dict(color='orange')),
+            row=2, col=1
+        )
+        
+        fig.update_layout(height=600, showlegend=True)
+        fig.update_xaxes(title_text="时间", row=2, col=1)
+        fig.update_yaxes(title_text="价格(元)", row=1, col=1)
+        fig.update_yaxes(title_text="成交量(股)", row=2, col=1)
+        
+        st.plotly_chart(fig, width='stretch')
+        
+        # 显示数据下载选项
+        st.subheader("💾 数据导出")
+        
+        # 转换为CSV格式
+        csv_data = trades_df.to_csv(index=True)
+        
+        st.download_button(
+            label="📥 下载CSV数据",
+            data=csv_data,
+            file_name=f"{symbol}_{selected_date.strftime('%Y%m%d')}_trades.csv",
+            mime="text/csv"
+        )
 
 if __name__ == "__main__":
     main()
