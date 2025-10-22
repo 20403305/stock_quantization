@@ -1427,7 +1427,24 @@ def display_intraday_trades(symbol, stock_name):
         elif trades_df.empty:
             st.error(f"❌ 数据获取失败: trades_df is empty")
         else:
-            st.success(f"✅ 成功获取数据: {len(trades_df)} 条记录")
+            # 确保数据按时间正序排序
+            if 'datetime' in trades_df.columns:
+                trades_df = trades_df.sort_values('datetime', ascending=True)
+            
+            # 检查排序是否正确
+            if len(trades_df) > 1:
+                first_time = trades_df.index[0]
+                last_time = trades_df.index[-1]
+                st.success(f"✅ 成功获取数据: {len(trades_df)} 条记录 (时间范围: {first_time.strftime('%H:%M:%S')} - {last_time.strftime('%H:%M:%S')})")
+            else:
+                st.success(f"✅ 成功获取数据: {len(trades_df)} 条记录")
+            
+            # 显示排序状态
+            if len(trades_df) > 1:
+                time_diff = (trades_df.index[-1] - trades_df.index[0]).total_seconds()
+                if time_diff < 0:
+                    st.warning("⚠️ 数据时间顺序异常，已重新排序")
+                    trades_df = trades_df.sort_index(ascending=True)
         
         if trades_df is None or trades_df.empty:
             if selected_date == api_trade_date:
@@ -1561,14 +1578,15 @@ def display_intraday_trades(symbol, stock_name):
         # 添加交易状态列
         display_df['trade_status'] = display_df['timestamp'].apply(get_trade_status)
         
-        # 添加成交量变化列
+        # 添加成交量变化列（在格式化之前计算，使用原始数值）
         display_df['volume_change'] = ""
-        for i in range(len(display_df)):
+        for i in range(len(trades_df)):
             if i == 0:
                 display_df.iloc[i, display_df.columns.get_loc('volume_change')] = "首笔"
             else:
-                current_volume = display_df.iloc[i]['volume']
-                previous_volume = display_df.iloc[i-1]['volume']
+                # 使用原始数据计算成交量变化
+                current_volume = trades_df.iloc[i]['volume']
+                previous_volume = trades_df.iloc[i-1]['volume']
                 display_df.iloc[i, display_df.columns.get_loc('volume_change')] = get_volume_change(current_volume, previous_volume)
         
         # 重置索引以显示时间
