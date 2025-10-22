@@ -285,6 +285,18 @@ def get_company_info(symbol: str, provider: Optional[str] = None) -> Dict[str, A
     """获取上市公司基本信息（独立函数）"""
     return get_data_manager().get_company_info(symbol, provider)
 
+def get_quarterly_profit(symbol: str) -> Optional[List[Dict[str, Any]]]:
+    """获取近一年各季度利润数据（独立函数）"""
+    return get_data_manager().get_quarterly_profit(symbol)
+
+def get_quarterly_cashflow(symbol: str) -> Optional[List[Dict[str, Any]]]:
+    """获取近一年各季度现金流数据（独立函数）"""
+    return get_data_manager().get_quarterly_cashflow(symbol)
+
+def get_performance_forecast(symbol: str) -> Optional[List[Dict[str, Any]]]:
+    """获取近年业绩预告数据（独立函数）"""
+    return get_data_manager().get_performance_forecast(symbol)
+
 class DataManager:
     """数据管理器类"""
     
@@ -946,9 +958,57 @@ class DataManager:
         """
         return self.mairui_provider.get_trade_summary(symbol, trade_date)
     
-    def test_mairui_connection(self) -> bool:
+    def test_mairui_connection(self) -> Dict[str, Any]:
         """测试麦蕊智数API连接"""
         return self.mairui_provider.test_connection()
+    
+    def get_quarterly_profit(self, symbol: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取近一年各季度利润数据
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            季度利润数据列表
+        """
+        try:
+            return self.mairui_provider.get_quarterly_profit(symbol)
+        except Exception as e:
+            logger.error(f"获取季度利润数据失败: {e}")
+            return None
+    
+    def get_quarterly_cashflow(self, symbol: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取近一年各季度现金流数据
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            季度现金流数据列表
+        """
+        try:
+            return self.mairui_provider.get_quarterly_cashflow(symbol)
+        except Exception as e:
+            logger.error(f"获取季度现金流数据失败: {e}")
+            return None
+    
+    def get_performance_forecast(self, symbol: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取近年业绩预告数据
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            业绩预告数据列表
+        """
+        try:
+            return self.mairui_provider.get_performance_forecast(symbol)
+        except Exception as e:
+            logger.error(f"获取业绩预告数据失败: {e}")
+            return None
     
     def get_historical_intraday_trades(self, symbol: str, trade_date: date) -> Optional[pd.DataFrame]:
         """
@@ -1011,3 +1071,8 @@ class DataManager:
             清理的文件数量
         """
         return self.mairui_provider.cleanup_old_data(days_to_keep)
+
+
+def test_mairui_connection() -> Dict[str, Any]:
+    """测试麦蕊智数API连接（独立函数）"""
+    return get_data_manager().test_mairui_connection()

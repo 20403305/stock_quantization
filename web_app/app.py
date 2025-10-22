@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta, date
 
-from src.data_provider.data_manager import DataManager, get_stock_name, search_stock, get_stock_mapping, get_company_info
+from src.data_provider.data_manager import DataManager, get_stock_name, search_stock, get_stock_mapping, get_company_info, get_quarterly_profit, get_quarterly_cashflow, get_performance_forecast, test_mairui_connection
 from src.strategy.ma_strategy import MAStrategy
 from src.strategy.rsi_strategy import RSIStrategy
 from src.strategy.macd_strategy import MACDStrategy
@@ -106,6 +106,23 @@ def get_available_intraday_dates(symbol):
     data_manager = DataManager()
     return data_manager.get_available_intraday_dates(symbol)
 
+@st.cache_data
+def cached_get_quarterly_profit(symbol):
+    """获取近一年各季度利润数据（带缓存）"""
+    return get_quarterly_profit(symbol)
+
+@st.cache_data
+def cached_get_quarterly_cashflow(symbol):
+    """获取近一年各季度现金流数据（带缓存）"""
+    return get_quarterly_cashflow(symbol)
+
+@st.cache_data
+def cached_get_performance_forecast(symbol):
+    """获取近年业绩预告数据（带缓存）"""
+    return get_performance_forecast(symbol)
+
+
+
 def main():
     """主函数"""
     st.title("🚀 Python量化交易平台")
@@ -129,6 +146,8 @@ def main():
             format_func=lambda x: "Tushare" if x == "tushare" else "Yahoo Finance" if x == "yfinance" else "AKShare",
             help="选择股票数据来源，默认为Tushare"
         )
+        
+
         
         # 股票选择
         st.subheader("股票选择")
@@ -690,7 +709,291 @@ def display_company_info(company_info):
     st.subheader("📖 公司简介")
     st.write(company_info.get('company_intro', '暂无公司简介信息'))
     
+    # 获取股票代码用于财务数据查询
+    symbol = company_info.get('symbol', '')
+    if symbol:
+        # 显示财务数据
+        display_financial_data(symbol)
+    
     st.markdown("---")
+
+def display_financial_data(symbol):
+    """显示财务数据"""
+    st.header("💰 财务数据")
+    
+    # 测试麦蕊智数连接
+    with st.spinner("正在测试API连接..."):
+        connection_result = test_mairui_connection()
+    
+    # 显示连接状态
+    if connection_result["overall_status"]:
+        st.success("✅ 麦蕊智数API连接正常")
+        st.write(f"**状态**: {connection_result['message']}")
+        
+        # 显示详细连接信息
+        with st.expander("🔌 API连接详情"):
+            for api_name, api_result in connection_result["details"].items():
+                if api_result["status"]:
+                    st.success(f"✅ {api_name}: 连接正常")
+                    st.write(f"   响应时间: {api_result.get('response_time', 'N/A'):.3f}秒")
+                    if api_result.get('data_count') is not None:
+                        st.write(f"   数据量: {api_result['data_count']}条")
+                else:
+                    st.error(f"❌ {api_name}: 连接失败")
+                    if api_result.get('error'):
+                        st.write(f"   错误信息: {api_result['error']}")
+                    if api_result.get('status_code'):
+                        st.write(f"   状态码: {api_result['status_code']}")
+    else:
+        st.error("❌ 麦蕊智数API连接异常")
+        st.write(f"**状态**: {connection_result['message']}")
+        st.info("""
+        **当前状态:**
+        - API连接失败，无法获取财务数据
+        - 如需获取财务数据，请检查licence配置：
+          1. 在项目根目录创建 `.env` 文件
+          2. 添加麦蕊智数licence配置：`MAIRUI_LICENCE=your_licence_here`
+          3. 重新启动应用
+        """)
+        return
+    
+    # 创建选项卡显示不同的财务数据
+    tab1, tab2, tab3 = st.tabs(["📊 季度利润", "💸 季度现金流", "📈 业绩预告"])
+    
+    with tab1:
+        display_quarterly_profit(symbol)
+    
+    with tab2:
+        display_quarterly_cashflow(symbol)
+    
+    with tab3:
+        display_performance_forecast(symbol)
+
+def display_quarterly_profit(symbol):
+    """显示季度利润数据"""
+    st.subheader("📊 近一年各季度利润")
+    
+    with st.spinner("正在获取季度利润数据..."):
+        profit_data = cached_get_quarterly_profit(symbol)
+    
+    if not profit_data:
+        st.warning("⚠️ 未获取到季度利润数据")
+        return
+    
+    # 转换为DataFrame用于显示
+    df = pd.DataFrame(profit_data)
+    
+    # 格式化显示
+    display_df = df.copy()
+    
+    # 格式化金额字段（单位：万元）
+    amount_columns = ['income', 'expend', 'profit', 'totalp', 'reprofit', 'otherp', 'totalcp']
+    for col in amount_columns:
+        if col in display_df.columns:
+            display_df[col] = display_df[col].apply(lambda x: f"{x/10000:.2f}万" if pd.notna(x) else "-")
+    
+    # 格式化每股收益字段
+    if 'basege' in display_df.columns:
+        display_df['basege'] = display_df['basege'].apply(lambda x: f"{x:.4f}" if pd.notna(x) else "-")
+    if 'ettege' in display_df.columns:
+        display_df['ettege'] = display_df['ettege'].apply(lambda x: f"{x:.4f}" if pd.notna(x) else "-")
+    
+    # 重命名列名
+    column_mapping = {
+        'date': '报告期',
+        'income': '营业收入',
+        'expend': '营业支出',
+        'profit': '营业利润',
+        'totalp': '利润总额',
+        'reprofit': '净利润',
+        'basege': '基本每股收益',
+        'ettege': '稀释每股收益',
+        'otherp': '其他收益',
+        'totalcp': '综合收益总额'
+    }
+    
+    display_df = display_df.rename(columns=column_mapping)
+    
+    # 选择要显示的列
+    display_columns = ['报告期', '营业收入', '营业支出', '营业利润', '利润总额', '净利润', '基本每股收益']
+    available_columns = [col for col in display_columns if col in display_df.columns]
+    
+    st.dataframe(display_df[available_columns], width='stretch')
+    
+    # 显示利润趋势图
+    if len(df) > 1:
+        st.subheader("📈 利润趋势")
+        
+        fig = go.Figure()
+        
+        # 添加营业收入和净利润曲线
+        fig.add_trace(go.Scatter(
+            x=df['date'], y=df['income']/10000,
+            name='营业收入(万元)',
+            line=dict(color='blue', width=3)
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=df['date'], y=df['profit']/10000,
+            name='营业利润(万元)',
+            line=dict(color='green', width=3)
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=df['date'], y=df['reprofit']/10000,
+            name='净利润(万元)',
+            line=dict(color='red', width=3)
+        ))
+        
+        fig.update_layout(
+            title="季度利润趋势",
+            xaxis_title="报告期",
+            yaxis_title="金额(万元)",
+            height=400
+        )
+        
+        st.plotly_chart(fig, width='stretch')
+
+def display_quarterly_cashflow(symbol):
+    """显示季度现金流数据"""
+    st.subheader("💸 近一年各季度现金流")
+    
+    with st.spinner("正在获取季度现金流数据..."):
+        cashflow_data = cached_get_quarterly_cashflow(symbol)
+    
+    if not cashflow_data:
+        st.warning("⚠️ 未获取到季度现金流数据")
+        return
+    
+    # 转换为DataFrame用于显示
+    df = pd.DataFrame(cashflow_data)
+    
+    # 格式化显示
+    display_df = df.copy()
+    
+    # 格式化金额字段（单位：万元）
+    amount_columns = ['jyin', 'jyout', 'jyfinal', 'tzin', 'tzout', 'tzfinal', 
+                     'czin', 'czout', 'czfinal', 'hl', 'cashinc', 'cashs', 'cashe']
+    for col in amount_columns:
+        if col in display_df.columns:
+            display_df[col] = display_df[col].apply(lambda x: f"{x/10000:.2f}万" if pd.notna(x) else "-")
+    
+    # 重命名列名
+    column_mapping = {
+        'date': '报告期',
+        'jyin': '经营活动现金流入',
+        'jyout': '经营活动现金流出',
+        'jyfinal': '经营活动现金流量净额',
+        'tzin': '投资活动现金流入',
+        'tzout': '投资活动现金流出',
+        'tzfinal': '投资活动现金流量净额',
+        'czin': '筹资活动现金流入',
+        'czout': '筹资活动现金流出',
+        'czfinal': '筹资活动现金流量净额',
+        'hl': '汇率变动影响',
+        'cashinc': '现金净增加额',
+        'cashs': '期初现金余额',
+        'cashe': '期末现金余额'
+    }
+    
+    display_df = display_df.rename(columns=column_mapping)
+    
+    # 选择要显示的列
+    display_columns = ['报告期', '经营活动现金流量净额', '投资活动现金流量净额', 
+                     '筹资活动现金流量净额', '现金净增加额', '期末现金余额']
+    available_columns = [col for col in display_columns if col in display_df.columns]
+    
+    st.dataframe(display_df[available_columns], width='stretch')
+    
+    # 显示现金流趋势图
+    if len(df) > 1:
+        st.subheader("📈 现金流趋势")
+        
+        fig = go.Figure()
+        
+        # 添加各类现金流曲线
+        fig.add_trace(go.Scatter(
+            x=df['date'], y=df['jyfinal']/10000,
+            name='经营活动现金流(万元)',
+            line=dict(color='blue', width=3)
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=df['date'], y=df['tzfinal']/10000,
+            name='投资活动现金流(万元)',
+            line=dict(color='green', width=3)
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=df['date'], y=df['czfinal']/10000,
+            name='筹资活动现金流(万元)',
+            line=dict(color='red', width=3)
+        ))
+        
+        fig.update_layout(
+            title="季度现金流趋势",
+            xaxis_title="报告期",
+            yaxis_title="金额(万元)",
+            height=400
+        )
+        
+        st.plotly_chart(fig, width='stretch')
+
+def display_performance_forecast(symbol):
+    """显示业绩预告数据"""
+    st.subheader("📈 近年业绩预告")
+    
+    with st.spinner("正在获取业绩预告数据..."):
+        forecast_data = cached_get_performance_forecast(symbol)
+    
+    if not forecast_data:
+        st.warning("⚠️ 未获取到业绩预告数据")
+        return
+    
+    # 转换为DataFrame用于显示
+    df = pd.DataFrame(forecast_data)
+    
+    # 格式化显示
+    display_df = df.copy()
+    
+    # 重命名列名
+    column_mapping = {
+        'pdate': '预告日期',
+        'rdate': '报告期',
+        'type': '预告类型',
+        'abs': '预告内容',
+        'old': '上年同期值'
+    }
+    
+    display_df = display_df.rename(columns=column_mapping)
+    
+    # 按预告日期倒序排列
+    display_df = display_df.sort_values('预告日期', ascending=False)
+    
+    # 格式化上年同期值
+    if '上年同期值' in display_df.columns:
+        display_df['上年同期值'] = display_df['上年同期值'].apply(lambda x: f"{x}" if pd.notna(x) else "-")
+    
+    st.dataframe(display_df, width='stretch')
+    
+    # 显示业绩预告类型分布
+    if '预告类型' in df.columns:
+        st.subheader("📊 业绩预告类型分布")
+        
+        type_counts = df['type'].value_counts()
+        
+        fig = go.Figure(data=[go.Pie(
+            labels=type_counts.index,
+            values=type_counts.values,
+            hole=.3
+        )])
+        
+        fig.update_layout(
+            title="业绩预告类型分布",
+            height=400
+        )
+        
+        st.plotly_chart(fig, width='stretch')
 
 def display_model_analysis(model_results):
     """显示模型分析结果"""

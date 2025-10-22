@@ -321,20 +321,238 @@ class MairuiDataProvider:
         """
         return self.cache_manager.cleanup_old_data(days_to_keep)
     
-    def test_connection(self) -> bool:
-        """测试API连接"""
+    def test_connection(self) -> Dict[str, Any]:
+        """
+        测试API连接状态
+        
+        Returns:
+            连接测试结果字典，包含各个API接口的连接状态
+        """
         if not self.licence:
             logger.warning("麦蕊智数licence未配置")
-            return False
+            return {
+                "overall_status": False,
+                "message": "licence未配置",
+                "details": {}
+            }
+        
+        test_symbol = "000001"  # 测试用股票代码
+        results = {}
+        
+        # 测试逐笔交易API
+        try:
+            url = f"{self.base_url}/hsrl/zbjy/{test_symbol}/{self.licence}"
+            response = requests.get(url, timeout=10)
+            results["逐笔交易API"] = {
+                "status": response.status_code == 200,
+                "status_code": response.status_code,
+                "response_time": response.elapsed.total_seconds()
+            }
+        except Exception as e:
+            results["逐笔交易API"] = {
+                "status": False,
+                "error": str(e),
+                "response_time": None
+            }
+        
+        # 测试季度利润API
+        try:
+            url = f"{self.base_url}/hscp/jdlr/{test_symbol}/{self.licence}"
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            results["季度利润API"] = {
+                "status": response.status_code == 200 and isinstance(data, list),
+                "status_code": response.status_code,
+                "data_count": len(data) if isinstance(data, list) else 0,
+                "response_time": response.elapsed.total_seconds()
+            }
+        except Exception as e:
+            results["季度利润API"] = {
+                "status": False,
+                "error": str(e),
+                "response_time": None
+            }
+        
+        # 测试季度现金流API
+        try:
+            url = f"{self.base_url}/hscp/jdxj/{test_symbol}/{self.licence}"
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            results["季度现金流API"] = {
+                "status": response.status_code == 200 and isinstance(data, list),
+                "status_code": response.status_code,
+                "data_count": len(data) if isinstance(data, list) else 0,
+                "response_time": response.elapsed.total_seconds()
+            }
+        except Exception as e:
+            results["季度现金流API"] = {
+                "status": False,
+                "error": str(e),
+                "response_time": None
+            }
+        
+        # 测试业绩预告API
+        try:
+            url = f"{self.base_url}/hscp/yjyg/{test_symbol}/{self.licence}"
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            results["业绩预告API"] = {
+                "status": response.status_code == 200 and isinstance(data, list),
+                "status_code": response.status_code,
+                "data_count": len(data) if isinstance(data, list) else 0,
+                "response_time": response.elapsed.total_seconds()
+            }
+        except Exception as e:
+            results["业绩预告API"] = {
+                "status": False,
+                "error": str(e),
+                "response_time": None
+            }
+        
+        # 计算总体状态
+        overall_status = all(result["status"] for result in results.values() if "status" in result)
+        
+        # 生成详细消息
+        if overall_status:
+            message = "所有API接口连接正常"
+        else:
+            failed_apis = [api for api, result in results.items() if not result.get("status", False)]
+            message = f"部分API接口连接失败: {', '.join(failed_apis)}"
+        
+        return {
+            "overall_status": overall_status,
+            "message": message,
+            "details": results
+        }
+    
+    def get_quarterly_profit(self, symbol: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取近一年各季度利润数据
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            季度利润数据列表
+        """
+        if not self.licence:
+            logger.warning("麦蕊智数licence未配置")
+            return None
         
         try:
-            # 测试一个常见股票
-            test_symbol = "000001"
-            url = f"{self.base_url}/hsrl/zbjy/{test_symbol}/{self.licence}"
+            symbol = self._format_symbol(symbol)
+            url = f"{self.base_url}/hscp/jdlr/{symbol}/{self.licence}"
             
-            response = requests.get(url, timeout=10)
-            return response.status_code == 200
+            response = requests.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if not data:
+                logger.warning(f"未获取到季度利润数据: {symbol}")
+                return None
+            
+            # 数据清洗和格式化
+            for item in data:
+                # 格式化金额字段
+                for field in ['income', 'expend', 'profit', 'totalp', 'reprofit', 'otherp', 'totalcp']:
+                    if field in item and item[field]:
+                        # 去除逗号并转换为浮点数
+                        item[field] = float(str(item[field]).replace(',', ''))
+                
+                # 格式化每股收益字段
+                for field in ['basege', 'ettege']:
+                    if field in item and item[field]:
+                        item[field] = float(str(item[field]))
+            
+            logger.info(f"成功获取季度利润数据: {symbol}, 数据量: {len(data)}")
+            return data
             
         except Exception as e:
-            logger.error(f"麦蕊智数API连接测试失败: {e}")
-            return False
+            logger.error(f"获取季度利润数据失败: {e}")
+            return None
+    
+    def get_quarterly_cashflow(self, symbol: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取近一年各季度现金流数据
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            季度现金流数据列表
+        """
+        if not self.licence:
+            logger.warning("麦蕊智数licence未配置")
+            return None
+        
+        try:
+            symbol = self._format_symbol(symbol)
+            url = f"{self.base_url}/hscp/jdxj/{symbol}/{self.licence}"
+            
+            response = requests.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if not data:
+                logger.warning(f"未获取到季度现金流数据: {symbol}")
+                return None
+            
+            # 数据清洗和格式化
+            for item in data:
+                # 格式化金额字段
+                for field in ['jyin', 'jyout', 'jyfinal', 'tzin', 'tzout', 'tzfinal', 
+                            'czin', 'czout', 'czfinal', 'hl', 'cashinc', 'cashs', 'cashe']:
+                    if field in item and item[field]:
+                        # 处理特殊值（如'--'）
+                        field_value = str(item[field]).strip()
+                        if field_value in ['--', '-', 'N/A', 'null', 'None', '']:
+                            item[field] = 0.0
+                        else:
+                            # 去除逗号并转换为浮点数
+                            try:
+                                item[field] = float(field_value.replace(',', ''))
+                            except (ValueError, TypeError):
+                                item[field] = 0.0
+            
+            logger.info(f"成功获取季度现金流数据: {symbol}, 数据量: {len(data)}")
+            return data
+            
+        except Exception as e:
+            logger.error(f"获取季度现金流数据失败: {e}")
+            return None
+    
+    def get_performance_forecast(self, symbol: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取近年业绩预告数据
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            业绩预告数据列表
+        """
+        if not self.licence:
+            logger.warning("麦蕊智数licence未配置")
+            return None
+        
+        try:
+            symbol = self._format_symbol(symbol)
+            url = f"{self.base_url}/hscp/yjyg/{symbol}/{self.licence}"
+            
+            response = requests.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if not data:
+                logger.warning(f"未获取到业绩预告数据: {symbol}")
+                return None
+            
+            logger.info(f"成功获取业绩预告数据: {symbol}, 数据量: {len(data)}")
+            return data
+            
+        except Exception as e:
+            logger.error(f"获取业绩预告数据失败: {e}")
+            return None
