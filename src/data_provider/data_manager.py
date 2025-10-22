@@ -436,12 +436,30 @@ class DataManager:
             else:
                 logger.warning(f"未知的市场类型: {market_type}, 使用自动识别")
         
-        # 自动识别市场类型
+        # 首先尝试从股票列表缓存中查找市场类型
+        try:
+            stock_list = self._get_stock_list()
+            if not stock_list.empty:
+                # 查找匹配的股票代码
+                matched_stock = stock_list[stock_list['symbol'] == symbol]
+                if not matched_stock.empty:
+                    ts_code = matched_stock.iloc[0]['ts_code']
+                    if '.SH' in ts_code:
+                        return f"{symbol}.SH"
+                    elif '.SZ' in ts_code:
+                        return f"{symbol}.SZ"
+                    elif '.BJ' in ts_code:
+                        return f"{symbol}.BJ"
+        except Exception as e:
+            logger.debug(f"从股票列表缓存查找市场类型失败: {e}")
+        
+        # 如果缓存查找失败，使用数字前缀规则
         if symbol.startswith('6'):
             return f"{symbol}.SH"  # 沪市
         elif symbol.startswith('0') or symbol.startswith('3'):
             return f"{symbol}.SZ"  # 深市
-        elif symbol.startswith('4') or symbol.startswith('8'):
+        elif symbol.startswith('4') or symbol.startswith('8') or symbol.startswith('9'):
+            # 北交所股票代码：4开头（原新三板），8开头（北交所），9开头（创新层/精选层）
             return f"{symbol}.BJ"  # 北交所
         else:
             # 默认使用深市
@@ -649,6 +667,21 @@ class DataManager:
             
         except Exception as e:
             logger.error(f"保存缓存失败: {e}")
+    
+    def _get_stock_list(self) -> pd.DataFrame:
+        """
+        内部方法：获取股票列表（主要用于内部调用）
+        
+        Returns:
+            股票列表DataFrame
+        """
+        # 首先尝试从缓存加载
+        cached_data = self._load_stock_list_from_cache()
+        if cached_data is not None:
+            return cached_data
+        
+        # 如果缓存为空或过期，调用完整的get_stock_list方法
+        return self.get_stock_list()
     
     def get_stock_list(self, provider: Optional[str] = None) -> pd.DataFrame:
         """获取股票列表"""
