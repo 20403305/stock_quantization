@@ -914,16 +914,11 @@ def display_intraday_trades(symbol, stock_name):
         else:
             api_trade_date = date.today()  # 21点后API返回当天数据
         
-        # 显示调试信息
-        st.info(f"🔍 调试信息: 选择日期={selected_date}, API返回日期={api_trade_date}, 缓存日期={available_dates}")
-        
         # 如果选择的日期与API当前返回的日期匹配，尝试从API获取
         if selected_date == api_trade_date:
-            st.info("🔄 尝试从API获取数据...")
             trades_df = data_manager.get_intraday_trades(symbol, selected_date)
         else:
             # 历史数据从缓存获取
-            st.info("🔄 尝试从缓存获取历史数据...")
             trades_df = data_manager.get_historical_intraday_trades(symbol, selected_date)
         
         # 显示数据获取结果

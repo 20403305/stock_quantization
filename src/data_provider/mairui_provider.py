@@ -5,7 +5,7 @@
 import requests
 import pandas as pd
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional, Dict, Any, List
 from loguru import logger
 from pathlib import Path
