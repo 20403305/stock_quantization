@@ -29,6 +29,21 @@ except ImportError:
         
         def test_connection(self):
             return False
+        
+        def get_quarterly_profit(self, symbol):
+            return None
+        
+        def get_quarterly_cashflow(self, symbol):
+            return None
+        
+        def get_performance_forecast(self, symbol):
+            return None
+        
+        def get_fund_holdings(self, symbol):
+            return None
+        
+        def get_top_shareholders(self, symbol):
+            return None
 
 class SmartCacheManager:
     """智能缓存管理器 - 优化时间序列数据存储和查询"""
@@ -296,6 +311,14 @@ def get_quarterly_cashflow(symbol: str) -> Optional[List[Dict[str, Any]]]:
 def get_performance_forecast(symbol: str) -> Optional[List[Dict[str, Any]]]:
     """获取近年业绩预告数据（独立函数）"""
     return get_data_manager().get_performance_forecast(symbol)
+
+def get_fund_holdings(symbol: str) -> Optional[List[Dict[str, Any]]]:
+    """获取基金持股数据（独立函数）"""
+    return get_data_manager().get_fund_holdings(symbol)
+
+def get_top_shareholders(symbol: str) -> Optional[List[Dict[str, Any]]]:
+    """获取十大股东数据（独立函数）"""
+    return get_data_manager().get_top_shareholders(symbol)
 
 class DataManager:
     """数据管理器类"""
@@ -1008,6 +1031,38 @@ class DataManager:
             return self.mairui_provider.get_performance_forecast(symbol)
         except Exception as e:
             logger.error(f"获取业绩预告数据失败: {e}")
+            return None
+    
+    def get_fund_holdings(self, symbol: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取基金持股数据
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            基金持股数据列表
+        """
+        try:
+            return self.mairui_provider.get_fund_holdings(symbol)
+        except Exception as e:
+            logger.error(f"获取基金持股数据失败: {e}")
+            return None
+    
+    def get_top_shareholders(self, symbol: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取十大股东数据
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            十大股东数据列表
+        """
+        try:
+            return self.mairui_provider.get_top_shareholders(symbol)
+        except Exception as e:
+            logger.error(f"获取十大股东数据失败: {e}")
             return None
     
     def get_historical_intraday_trades(self, symbol: str, trade_date: date) -> Optional[pd.DataFrame]:

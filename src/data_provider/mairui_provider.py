@@ -409,6 +409,42 @@ class MairuiDataProvider:
                 "response_time": None
             }
         
+        # 测试基金持股API
+        try:
+            url = f"{self.base_url}/hscp/jjcg/{test_symbol}/{self.licence}"
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            results["基金持股API"] = {
+                "status": response.status_code == 200 and isinstance(data, list),
+                "status_code": response.status_code,
+                "data_count": len(data) if isinstance(data, list) else 0,
+                "response_time": response.elapsed.total_seconds()
+            }
+        except Exception as e:
+            results["基金持股API"] = {
+                "status": False,
+                "error": str(e),
+                "response_time": None
+            }
+        
+        # 测试十大股东API
+        try:
+            url = f"{self.base_url}/hscp/sdgd/{test_symbol}/{self.licence}"
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            results["十大股东API"] = {
+                "status": response.status_code == 200 and isinstance(data, list),
+                "status_code": response.status_code,
+                "data_count": len(data) if isinstance(data, list) else 0,
+                "response_time": response.elapsed.total_seconds()
+            }
+        except Exception as e:
+            results["十大股东API"] = {
+                "status": False,
+                "error": str(e),
+                "response_time": None
+            }
+        
         # 计算总体状态
         overall_status = all(result["status"] for result in results.values() if "status" in result)
         
@@ -555,4 +591,72 @@ class MairuiDataProvider:
             
         except Exception as e:
             logger.error(f"获取业绩预告数据失败: {e}")
+            return None
+    
+    def get_fund_holdings(self, symbol: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取基金持股数据
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            基金持股数据列表
+        """
+        if not self.licence:
+            logger.warning("麦蕊智数licence未配置")
+            return None
+        
+        try:
+            symbol = self._format_symbol(symbol)
+            url = f"{self.base_url}/hscp/jjcg/{symbol}/{self.licence}"
+            
+            response = requests.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if not data:
+                logger.warning(f"未获取到基金持股数据: {symbol}")
+                return None
+            
+            logger.info(f"成功获取基金持股数据: {symbol}, 数据量: {len(data)}")
+            return data
+            
+        except Exception as e:
+            logger.error(f"获取基金持股数据失败: {e}")
+            return None
+    
+    def get_top_shareholders(self, symbol: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取十大股东数据
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            十大股东数据列表
+        """
+        if not self.licence:
+            logger.warning("麦蕊智数licence未配置")
+            return None
+        
+        try:
+            symbol = self._format_symbol(symbol)
+            url = f"{self.base_url}/hscp/sdgd/{symbol}/{self.licence}"
+            
+            response = requests.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if not data:
+                logger.warning(f"未获取到十大股东数据: {symbol}")
+                return None
+            
+            logger.info(f"成功获取十大股东数据: {symbol}, 数据量: {len(data)}")
+            return data
+            
+        except Exception as e:
+            logger.error(f"获取十大股东数据失败: {e}")
             return None

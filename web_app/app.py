@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta, date
 
-from src.data_provider.data_manager import DataManager, get_stock_name, search_stock, get_stock_mapping, get_company_info, get_quarterly_profit, get_quarterly_cashflow, get_performance_forecast, test_mairui_connection
+from src.data_provider.data_manager import DataManager, get_stock_name, search_stock, get_stock_mapping, get_company_info, get_quarterly_profit, get_quarterly_cashflow, get_performance_forecast, get_fund_holdings, get_top_shareholders, test_mairui_connection
 from src.strategy.ma_strategy import MAStrategy
 from src.strategy.rsi_strategy import RSIStrategy
 from src.strategy.macd_strategy import MACDStrategy
@@ -120,6 +120,16 @@ def cached_get_quarterly_cashflow(symbol):
 def cached_get_performance_forecast(symbol):
     """获取近年业绩预告数据（带缓存）"""
     return get_performance_forecast(symbol)
+
+@st.cache_data
+def cached_get_fund_holdings(symbol):
+    """获取基金持股数据（带缓存）"""
+    return get_fund_holdings(symbol)
+
+@st.cache_data
+def cached_get_top_shareholders(symbol):
+    """获取十大股东数据（带缓存）"""
+    return get_top_shareholders(symbol)
 
 
 
@@ -758,7 +768,7 @@ def display_financial_data(symbol):
         return
     
     # 创建选项卡显示不同的财务数据
-    tab1, tab2, tab3 = st.tabs(["📊 季度利润", "💸 季度现金流", "📈 业绩预告"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 季度利润", "💸 季度现金流", "📈 业绩预告", "🏦 基金持股", "👥 十大股东"])
     
     with tab1:
         display_quarterly_profit(symbol)
@@ -768,6 +778,12 @@ def display_financial_data(symbol):
     
     with tab3:
         display_performance_forecast(symbol)
+    
+    with tab4:
+        display_fund_holdings(symbol)
+    
+    with tab5:
+        display_top_shareholders(symbol)
 
 def display_quarterly_profit(symbol):
     """显示季度利润数据"""
@@ -994,6 +1010,187 @@ def display_performance_forecast(symbol):
         )
         
         st.plotly_chart(fig, width='stretch')
+
+def display_fund_holdings(symbol):
+    """显示基金持股数据"""
+    st.subheader("🏦 基金持股")
+    
+    with st.spinner("正在获取基金持股数据..."):
+        fund_data = cached_get_fund_holdings(symbol)
+    
+    if not fund_data:
+        st.warning("⚠️ 未获取到基金持股数据")
+        return
+    
+    # 转换为DataFrame用于显示
+    df = pd.DataFrame(fund_data)
+    
+    # 检查数据是否为空
+    if df.empty:
+        st.warning("⚠️ 获取到的基金持股数据为空")
+        return
+    
+    # 重命名列名（API返回的字段名映射到前端期望的字段名）
+    column_mapping = {
+        'jjmc': 'fund_name',
+        'jjdm': 'fund_code', 
+        'ccsl': 'hold_amount',
+        'cgsz': 'market_value',
+        'ltbl': 'hold_ratio',
+        'jzrq': 'report_date'
+    }
+    
+    # 重命名列
+    df = df.rename(columns=column_mapping)
+    
+    # 格式化显示
+    display_df = df.copy()
+    
+    # 格式化金额字段
+    amount_columns = ['hold_amount', 'market_value', 'hold_ratio']
+    for col in amount_columns:
+        if col in display_df.columns:
+            if col == 'hold_ratio':
+                display_df[col] = display_df[col].apply(lambda x: f"{x:.2%}" if pd.notna(x) else "-")
+            else:
+                display_df[col] = display_df[col].apply(lambda x: _format_amount(x) if pd.notna(x) else "-")
+    
+    # 重命名列名（中文显示）
+    display_mapping = {
+        'fund_name': '基金名称',
+        'fund_code': '基金代码',
+        'hold_amount': '持股数量',
+        'market_value': '持股市值',
+        'hold_ratio': '持股比例',
+        'report_date': '报告期'
+    }
+    
+    display_df = display_df.rename(columns=display_mapping)
+    
+    # 选择要显示的列
+    display_columns = ['基金名称', '基金代码', '持股数量', '持股市值', '持股比例', '报告期']
+    available_columns = [col for col in display_columns if col in display_df.columns]
+    
+    st.dataframe(display_df[available_columns], width='stretch')
+    
+    # 显示基金持股分布图
+    if len(df) > 1 and 'hold_ratio' in df.columns:
+        st.subheader("📊 基金持股分布")
+        
+        # 按持股比例排序，取前10名
+        top_funds = df.nlargest(10, 'hold_ratio')
+        
+        fig = go.Figure(data=[
+            go.Bar(
+                x=top_funds['fund_name'],
+                y=top_funds['hold_ratio'],
+                text=top_funds['hold_ratio'].apply(lambda x: f"{x:.2%}"),
+                textposition='auto',
+            )
+        ])
+        
+        fig.update_layout(
+            title="前十大基金持股比例",
+            xaxis_title="基金名称",
+            yaxis_title="持股比例",
+            xaxis_tickangle=-45
+        )
+        
+        st.plotly_chart(fig, width='stretch')
+
+def display_top_shareholders(symbol):
+    """显示十大股东数据"""
+    st.subheader("👥 十大股东")
+    
+    with st.spinner("正在获取十大股东数据..."):
+        shareholder_data = cached_get_top_shareholders(symbol)
+    
+    if not shareholder_data:
+        st.warning("⚠️ 未获取到十大股东数据")
+        return
+    
+    # 处理嵌套的十大股东数据结构
+    all_shareholders = []
+    for period_data in shareholder_data:
+        report_date = period_data.get('jzrq', '未知日期')
+        if 'sdgd' in period_data and period_data['sdgd']:
+            for shareholder in period_data['sdgd']:
+                shareholder['report_date'] = report_date
+                all_shareholders.append(shareholder)
+    
+    if not all_shareholders:
+        st.warning("⚠️ 获取到的十大股东数据为空")
+        return
+    
+    # 转换为DataFrame用于显示
+    df = pd.DataFrame(all_shareholders)
+    
+    # 重命名列名（API返回的字段名映射到前端期望的字段名）
+    column_mapping = {
+        'pm': 'rank',
+        'gdmc': 'shareholder_name',
+        'cgsl': 'hold_amount',
+        'cgbl': 'hold_ratio',
+        'gbxz': 'shareholder_type',
+        'report_date': 'report_date'
+    }
+    
+    # 重命名列
+    df = df.rename(columns=column_mapping)
+    
+    # 格式化显示
+    display_df = df.copy()
+    
+    # 格式化金额字段
+    amount_columns = ['hold_amount', 'hold_ratio']
+    for col in amount_columns:
+        if col in display_df.columns:
+            if col == 'hold_ratio':
+                display_df[col] = display_df[col].apply(lambda x: f"{x:.2%}" if pd.notna(x) else "-")
+            else:
+                display_df[col] = display_df[col].apply(lambda x: _format_amount(x) if pd.notna(x) else "-")
+    
+    # 重命名列名（中文显示）
+    display_mapping = {
+        'rank': '排名',
+        'shareholder_name': '股东名称',
+        'shareholder_type': '股东类型',
+        'hold_amount': '持股数量',
+        'hold_ratio': '持股比例',
+        'report_date': '报告期'
+    }
+    
+    display_df = display_df.rename(columns=display_mapping)
+    
+    # 选择要显示的列
+    display_columns = ['排名', '股东名称', '股东类型', '持股数量', '持股比例', '报告期']
+    available_columns = [col for col in display_columns if col in display_df.columns]
+    
+    st.dataframe(display_df[available_columns], width='stretch')
+    
+    # 显示股东持股分布图（按最新报告期）
+    if len(df) > 1 and 'hold_ratio' in df.columns:
+        st.subheader("📊 最新报告期股东持股分布")
+        
+        # 获取最新报告期的数据
+        latest_date = df['report_date'].max()
+        latest_data = df[df['report_date'] == latest_date]
+        
+        if len(latest_data) > 0:
+            fig = go.Figure(data=[
+                go.Pie(
+                    labels=latest_data['shareholder_name'],
+                    values=latest_data['hold_ratio'],
+                    textinfo='label+percent',
+                    hole=0.3
+                )
+            ])
+            
+            fig.update_layout(
+                title=f"{latest_date} 十大股东持股比例分布"
+            )
+            
+            st.plotly_chart(fig, width='stretch')
 
 def display_model_analysis(model_results):
     """显示模型分析结果"""
