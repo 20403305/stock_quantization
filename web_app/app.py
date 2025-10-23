@@ -34,9 +34,9 @@ from collections import defaultdict
 def load_recent_stocks():
     """加载近期关注股票数据"""
     try:
-        # 存储到data目录
-        data_dir = Path(__file__).parent.parent / 'data'
-        data_dir.mkdir(exist_ok=True)  # 确保目录存在
+        # 存储到data目录下的recent_stocks子目录
+        data_dir = Path(__file__).parent.parent / 'data' / 'recent_stocks'
+        data_dir.mkdir(exist_ok=True, parents=True)  # 确保目录存在，包括父目录
         file_path = data_dir / 'recent_stocks.json'
         with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -46,9 +46,9 @@ def load_recent_stocks():
 def save_recent_stocks(recent_stocks):
     """保存近期关注股票数据"""
     try:
-        # 存储到data目录
-        data_dir = Path(__file__).parent.parent / 'data'
-        data_dir.mkdir(exist_ok=True)  # 确保目录存在
+        # 存储到data目录下的recent_stocks子目录
+        data_dir = Path(__file__).parent.parent / 'data' / 'recent_stocks'
+        data_dir.mkdir(exist_ok=True, parents=True)  # 确保目录存在，包括父目录
         file_path = data_dir / 'recent_stocks.json'
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(recent_stocks, f, ensure_ascii=False, indent=2)
