@@ -635,8 +635,12 @@ class DataManager:
         
         return symbol  # 如果无法获取名称，返回原始代码
     
-    def _load_stock_list_from_cache(self) -> Optional[pd.DataFrame]:
-        """从缓存加载股票列表"""
+    def _load_stock_list_from_cache(self, allow_expired: bool = False) -> Optional[pd.DataFrame]:
+        """从缓存加载股票列表
+        
+        Args:
+            allow_expired: 是否允许返回过期的缓存数据
+        """
         if not self.stock_list_cache_file.exists():
             return None
         
@@ -646,9 +650,15 @@ class DataManager:
             
             # 检查缓存是否过期（通过文件修改时间）
             file_mtime = datetime.fromtimestamp(self.stock_list_cache_file.stat().st_mtime)
-            if datetime.now() - file_mtime > timedelta(hours=self.cache_expire_hours):
-                logger.info("股票列表缓存已过期")
-                return None
+            is_expired = datetime.now() - file_mtime > timedelta(hours=self.cache_expire_hours)
+            
+            if is_expired:
+                if allow_expired:
+                    logger.info("股票列表缓存已过期，但允许使用过期数据")
+                    return stock_list
+                else:
+                    logger.info("股票列表缓存已过期")
+                    return None
             
             logger.info(f"从缓存加载股票列表，共 {len(stock_list)} 条记录")
             return stock_list
@@ -687,8 +697,8 @@ class DataManager:
         """获取股票列表"""
         provider = provider or self.default_provider
         
-        # 首先尝试从缓存加载
-        cached_data = self._load_stock_list_from_cache()
+        # 首先尝试从缓存加载（不允许过期数据）
+        cached_data = self._load_stock_list_from_cache(allow_expired=False)
         if cached_data is not None:
             return cached_data
         
@@ -697,6 +707,11 @@ class DataManager:
                 import tushare as ts
                 if not API_CONFIG['tushare_token']:
                     logger.error("未配置Tushare Token")
+                    # 尝试使用过期缓存数据
+                    expired_cache = self._load_stock_list_from_cache(allow_expired=True)
+                    if expired_cache is not None:
+                        logger.info("未配置Tushare Token，使用过期缓存数据")
+                        return expired_cache
                     return self._get_fallback_stock_list()
                 
                 ts.set_token(API_CONFIG['tushare_token'])
@@ -713,21 +728,37 @@ class DataManager:
                 if not stock_list.empty:
                     self._save_stock_list_to_cache(stock_list)
                     logger.info(f"成功从Tushare获取股票列表，共 {len(stock_list)} 条记录")
+                    
+                    # 检查新获取的数据是否比过期缓存数据更完整
+                    expired_cache = self._load_stock_list_from_cache(allow_expired=True)
+                    if expired_cache is not None and len(stock_list) < len(expired_cache):
+                        logger.warning(f"新获取的股票列表({len(stock_list)})比过期缓存({len(expired_cache)})数据少，使用过期缓存数据")
+                        return expired_cache
                 else:
                     logger.warning("从Tushare获取的股票列表为空")
+                    # 获取失败时尝试使用过期缓存数据
+                    expired_cache = self._load_stock_list_from_cache(allow_expired=True)
+                    if expired_cache is not None:
+                        logger.info("API返回空数据，使用过期缓存数据")
+                        return expired_cache
                 
                 return stock_list
             else:
                 logger.warning(f"数据提供商 {provider} 不支持股票列表获取")
+                # 尝试使用过期缓存数据
+                expired_cache = self._load_stock_list_from_cache(allow_expired=True)
+                if expired_cache is not None:
+                    logger.info("数据提供商不支持，使用过期缓存数据")
+                    return expired_cache
                 return self._get_fallback_stock_list()
                 
         except Exception as e:
             logger.error(f"获取股票列表失败: {e}")
-            # 返回缓存数据（即使过期）或备用列表
-            cached_data = self._load_stock_list_from_cache()
-            if cached_data is not None:
-                logger.info("使用过期的缓存数据作为备用")
-                return cached_data
+            # 返回过期缓存数据或备用列表
+            expired_cache = self._load_stock_list_from_cache(allow_expired=True)
+            if expired_cache is not None:
+                logger.info("API调用失败，使用过期缓存数据作为备用")
+                return expired_cache
             return self._get_fallback_stock_list()
     
     def _get_fallback_stock_list(self) -> pd.DataFrame:

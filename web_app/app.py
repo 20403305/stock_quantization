@@ -55,8 +55,22 @@ def save_recent_stocks(recent_stocks):
     except Exception as e:
         print(f"保存近期关注数据失败: {e}")
 
+def is_valid_stock(symbol, data_provider):
+    """验证股票是否真实存在"""
+    try:
+        # 尝试获取股票名称，如果返回的不是原始代码，说明股票存在
+        stock_name = get_stock_name(symbol, data_provider)
+        return stock_name != symbol
+    except:
+        return False
+
 def add_recent_stock(symbol, stock_name, data_provider):
-    """添加股票到近期关注列表"""
+    """添加股票到近期关注列表（只添加真实存在的股票）"""
+    # 验证股票是否真实存在
+    if not is_valid_stock(symbol, data_provider):
+        print(f"⚠️ 股票 {symbol} 不存在，跳过记录到近期关注")
+        return
+    
     recent_stocks = load_recent_stocks()
     
     if symbol not in recent_stocks:
@@ -232,9 +246,7 @@ def main():
     if 'selected_symbol' in st.session_state and 'selected_stock_name' in st.session_state:
         symbol = st.session_state.selected_symbol
         stock_name = st.session_state.selected_stock_name
-        # 清除session state，避免重复使用
-        del st.session_state.selected_symbol
-        del st.session_state.selected_stock_name
+        # 不清除session state，保持股票选择状态
     else:
         symbol = "600519"
         stock_name = "贵州茅台"
@@ -301,6 +313,13 @@ def main():
                     stock_name = cached_get_stock_name(symbol, data_provider)
                 except:
                     stock_name = symbol
+        
+        # 清除股票选择状态按钮
+        if 'selected_symbol' in st.session_state:
+            if st.button("🗑️ 清除股票选择", type="secondary", help="清除从近期关注选择的股票，恢复默认股票"):
+                del st.session_state.selected_symbol
+                del st.session_state.selected_stock_name
+                st.rerun()
         
         # 功能模块选择
         st.subheader("功能模块")
