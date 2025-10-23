@@ -27,6 +27,95 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# 近期关注功能相关函数
+import json
+from collections import defaultdict
+
+def load_recent_stocks():
+    """加载近期关注股票数据"""
+    try:
+        # 存储到data目录
+        data_dir = Path(__file__).parent.parent / 'data'
+        data_dir.mkdir(exist_ok=True)  # 确保目录存在
+        file_path = data_dir / 'recent_stocks.json'
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save_recent_stocks(recent_stocks):
+    """保存近期关注股票数据"""
+    try:
+        # 存储到data目录
+        data_dir = Path(__file__).parent.parent / 'data'
+        data_dir.mkdir(exist_ok=True)  # 确保目录存在
+        file_path = data_dir / 'recent_stocks.json'
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(recent_stocks, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"保存近期关注数据失败: {e}")
+
+def add_recent_stock(symbol, stock_name, data_provider):
+    """添加股票到近期关注列表"""
+    recent_stocks = load_recent_stocks()
+    
+    if symbol not in recent_stocks:
+        recent_stocks[symbol] = []
+    
+    # 添加新的查询记录
+    new_record = {
+        "timestamp": datetime.now().timestamp(),
+        "stock_name": stock_name,
+        "data_provider": data_provider,
+        "query_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "symbol": symbol
+    }
+    
+    recent_stocks[symbol].append(new_record)
+    
+    # 限制每个股票最多保留10条记录
+    if len(recent_stocks[symbol]) > 10:
+        recent_stocks[symbol] = recent_stocks[symbol][-10:]
+    
+    save_recent_stocks(recent_stocks)
+
+def get_recent_stocks_ranking():
+    """获取近期关注股票排名（基于查询频次和时间）"""
+    recent_stocks = load_recent_stocks()
+    
+    if not recent_stocks:
+        return []
+    
+    ranking = []
+    for symbol, records in recent_stocks.items():
+        if records:
+            # 计算权重：频次权重 + 时间权重
+            frequency_weight = len(records)  # 查询频次
+            
+            # 最近一次查询的时间权重（越近权重越高）
+            latest_timestamp = max(record["timestamp"] for record in records)
+            time_weight = (datetime.now().timestamp() - latest_timestamp) / 3600  # 小时为单位
+            
+            # 综合权重 = 频次 * 时间衰减因子
+            # 时间衰减因子：1 / (1 + 时间差/24)，24小时衰减一半
+            time_decay = 1 / (1 + time_weight / 24)
+            combined_weight = frequency_weight * time_decay
+            
+            latest_record = max(records, key=lambda x: x["timestamp"])
+            
+            ranking.append({
+                "symbol": symbol,
+                "stock_name": latest_record["stock_name"],
+                "query_count": len(records),
+                "latest_query": latest_record["query_time"],
+                "latest_timestamp": latest_timestamp,
+                "weight": combined_weight
+            })
+    
+    # 按权重降序排序
+    ranking.sort(key=lambda x: x["weight"], reverse=True)
+    return ranking
+
 # 缓存数据获取函数
 @st.cache_data
 def load_stock_data(symbol, start_date, end_date, data_provider):
@@ -139,8 +228,17 @@ def main():
     st.markdown("---")
     
     # 初始化变量
-    symbol = "600519"
-    stock_name = "贵州茅台"
+    # 检查是否有从近期关注列表中选择的股票
+    if 'selected_symbol' in st.session_state and 'selected_stock_name' in st.session_state:
+        symbol = st.session_state.selected_symbol
+        stock_name = st.session_state.selected_stock_name
+        # 清除session state，避免重复使用
+        del st.session_state.selected_symbol
+        del st.session_state.selected_stock_name
+    else:
+        symbol = "600519"
+        stock_name = "贵州茅台"
+    
     model_platform = "local"
     selected_model = "deepseek-r1:7b"
     
@@ -163,7 +261,7 @@ def main():
         st.subheader("股票选择")
         
         # 股票搜索和选择
-        search_query = st.text_input("搜索股票（代码或名称）", value="600519", 
+        search_query = st.text_input("搜索股票（代码或名称）", value=symbol, 
                                    help="输入股票代码（如600519）或名称（如贵州茅台）")
         
         # 搜索股票
@@ -208,7 +306,7 @@ def main():
         st.subheader("功能模块")
         function_module = st.radio(
             "选择分析功能",
-            ["历史数据", "回测分析", "AI诊股", "基本信息", "逐笔交易"],
+            ["历史数据", "回测分析", "AI诊股", "基本信息", "逐笔交易", "近期关注"],
             help="选择不同的分析功能模块"
         )
         
@@ -373,6 +471,17 @@ def main():
             model_platform = "local"
             selected_model = "deepseek-r1:7b"
         
+        # 近期关注模块参数
+        elif function_module == "近期关注":
+            # 设置默认值
+            start_date = datetime.now() - timedelta(days=365)
+            end_date = datetime.now()
+            strategy_name = "移动平均策略"
+            strategy_params = {}
+            enable_model_analysis = False
+            model_platform = "local"
+            selected_model = "deepseek-r1:7b"
+        
         # 基本信息和逐笔交易不需要额外参数
         else:
             # 设置默认值
@@ -436,6 +545,22 @@ def main():
             run_model_only = False
             show_intraday = st.session_state.show_intraday
             show_basic_info = False
+        elif function_module == "近期关注":
+            # 使用session state来保持近期关注显示状态
+            if 'show_recent' not in st.session_state:
+                st.session_state.show_recent = False
+            
+            run_button = st.button("⭐ 查看近期关注", type="primary")
+            
+            # 如果点击了按钮，设置session state
+            if run_button:
+                st.session_state.show_recent = True
+            
+            run_backtest = False
+            run_model_only = False
+            show_intraday = False
+            show_basic_info = False
+            show_recent = st.session_state.show_recent
     
     # 主内容区域
     # 确保所有变量都已定义
@@ -449,8 +574,10 @@ def main():
         show_intraday = False
     if 'show_basic_info' not in locals():
         show_basic_info = False
+    if 'show_recent' not in locals():
+        show_recent = False
     
-    if run_history or run_backtest or run_model_only or show_intraday or show_basic_info:
+    if run_history or run_backtest or run_model_only or show_intraday or show_basic_info or show_recent:
         # 确保变量已定义
         if 'symbol' not in locals():
             symbol = "600519"  # 默认股票代码
@@ -475,6 +602,10 @@ def main():
         with st.spinner("正在获取数据和运行分析..."):
             # 获取股票名称
             stock_name = get_stock_name(symbol, data_provider)
+            
+            # 记录查询历史（除了近期关注模块本身）
+            if function_module != "近期关注":
+                add_recent_stock(symbol, stock_name, data_provider)
             
             # 历史数据模块
             if run_history:
@@ -559,6 +690,11 @@ def main():
                                 display_model_analysis(model_results)
                         except NameError:
                             pass
+            
+            # 近期关注模块
+            if show_recent:
+                display_recent_stocks()
+                return  # 近期关注显示完成后直接返回
     
     else:
         # 默认显示
@@ -2225,6 +2361,104 @@ def display_data_statistics(data):
         if 'Volume' in data.columns:
             volume_stats = data['Volume'].describe()
             st.write(volume_stats)
+
+def display_recent_stocks():
+    """显示近期关注股票列表"""
+    st.header("⭐ 近期关注股票")
+    
+    # 获取近期关注股票排名
+    recent_stocks = get_recent_stocks_ranking()
+    
+    if not recent_stocks:
+        st.info("📝 暂无近期关注记录，请先查询一些股票来建立关注列表")
+        return
+    
+    # 显示统计信息
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("关注股票数量", len(recent_stocks))
+    with col2:
+        total_queries = sum(stock['query_count'] for stock in recent_stocks)
+        st.metric("总查询次数", total_queries)
+    with col3:
+        latest_stock = max(recent_stocks, key=lambda x: x['latest_timestamp'])
+        st.metric("最近查询", latest_stock['stock_name'])
+    
+    st.markdown("---")
+    
+    # 显示近期关注股票列表
+    st.subheader("📋 近期关注列表（按关注度排序）")
+    
+    # 创建数据框显示
+    recent_df = pd.DataFrame([{
+        '排名': i+1,
+        '股票代码': stock['symbol'],
+        '股票名称': stock['stock_name'],
+        '查询次数': stock['query_count'],
+        '最近查询': stock['latest_query'],
+        '关注度': f"{stock['weight']:.2f}"
+    } for i, stock in enumerate(recent_stocks)])
+    
+    # 显示表格
+    st.dataframe(recent_df, width='stretch', hide_index=True)
+    
+    # 添加快速选择功能
+    st.subheader("🚀 快速选择")
+    
+    # 创建选择框
+    stock_options = [f"{stock['symbol']} - {stock['stock_name']}" for stock in recent_stocks]
+    selected_stock = st.selectbox(
+        "选择股票快速查看",
+        stock_options,
+        help="从近期关注列表中选择股票进行快速查看"
+    )
+    
+    if selected_stock:
+        selected_symbol = selected_stock.split(' - ')[0]
+        
+        # 显示选中股票的详细信息
+        st.subheader(f"📊 {selected_stock} 的查询记录")
+        
+        # 添加快速分析按钮（放在查询记录表格上方）
+        if st.button(f"📈 快速分析 {selected_stock}", type="primary"):
+            # 设置session state来更新搜索框的股票选择
+            st.session_state.selected_symbol = selected_symbol
+            st.session_state.selected_stock_name = selected_stock.split(' - ')[1]
+            st.success(f"✅ 已选择 {selected_stock}，正在切换到该股票...")
+            # 使用rerun来刷新页面并更新搜索框
+            st.rerun()
+        
+        # 获取该股票的详细查询记录
+        recent_stocks_data = load_recent_stocks()
+        if selected_symbol in recent_stocks_data:
+            stock_records = recent_stocks_data[selected_symbol]
+            
+            # 显示查询记录
+            records_df = pd.DataFrame(stock_records)
+            records_df = records_df[['query_time', 'data_provider']]
+            records_df.columns = ['查询时间', '数据源']
+            records_df = records_df.sort_values('查询时间', ascending=False)
+            
+            st.dataframe(records_df, width='stretch', hide_index=True)
+    
+    # 隐藏管理功能（注释掉相关代码）
+    # st.markdown("---")
+    # st.subheader("⚙️ 管理功能")
+    # 
+    # col1, col2 = st.columns(2)
+    # 
+    # with col1:
+    #     if st.button("🗑️ 清空所有记录", type="secondary"):
+    #         try:
+    #             save_recent_stocks({})
+    #             st.success("✅ 已清空所有近期关注记录")
+    #             st.rerun()
+    #         except Exception as e:
+    #             st.error(f"❌ 清空记录失败: {e}")
+    # 
+    # with col2:
+    #     if st.button("🔄 刷新列表", type="secondary"):
+    #         st.rerun()
 
 if __name__ == "__main__":
     main()
