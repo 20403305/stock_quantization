@@ -276,7 +276,8 @@ def main():
             st.write("模型平台")
             model_platform = st.selectbox(
                 "选择AI模型平台",
-                ["local", "deepseek", "alibaba", "siliconflow", "tencent", "modelscope", "zhipu"],
+                # ["local", "deepseek", "alibaba", "siliconflow", "tencent", "modelscope", "zhipu"],
+                ["tencent", "local", "deepseek", "alibaba", "siliconflow", "modelscope", "zhipu"],
                 format_func=lambda x: {
                     "local": "本地模型服务",
                     "deepseek": "深度求索平台", 
@@ -327,7 +328,7 @@ def main():
                 "deepseek": "deepseek-chat",
                 "alibaba": "qwen-turbo",
                 "siliconflow": "deepseek-llm-7b-chat",
-                "tencent": "hunyuan-standard",
+                "tencent": "hunyuan-lite",
                 "modelscope": "qwen-7b-chat",
                 "zhipu": "glm-4"
             }
