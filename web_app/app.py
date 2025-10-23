@@ -937,7 +937,7 @@ def display_quarterly_profit(symbol):
             height=400
         )
         
-        st.plotly_chart(fig, width='stretch', key=f"top_shareholders_pie_{symbol}")
+        st.plotly_chart(fig, width='stretch')
 
 def display_quarterly_cashflow(symbol):
     """显示季度现金流数据"""
@@ -1022,7 +1022,7 @@ def display_quarterly_cashflow(symbol):
             height=400
         )
         
-        st.plotly_chart(fig, width='stretch', key=f"top_shareholders_pie_{symbol}")
+        st.plotly_chart(fig, width='stretch')
 
 def display_performance_forecast(symbol):
     """显示业绩预告数据"""
@@ -1078,7 +1078,7 @@ def display_performance_forecast(symbol):
             height=400
         )
         
-        st.plotly_chart(fig, width='stretch', key=f"top_shareholders_pie_{symbol}")
+        st.plotly_chart(fig, width='stretch')
 
 def display_fund_holdings(symbol):
     """显示基金持股数据"""
@@ -1165,7 +1165,7 @@ def display_fund_holdings(symbol):
             xaxis_tickangle=-45
         )
         
-        st.plotly_chart(fig, width='stretch', key=f"top_shareholders_pie_{symbol}")
+        st.plotly_chart(fig, width='stretch')
 
 def display_top_shareholders(symbol):
     """显示十大股东数据"""
@@ -1259,7 +1259,7 @@ def display_top_shareholders(symbol):
                 title=f"{latest_date} 十大股东持股比例分布"
             )
             
-            st.plotly_chart(fig, width='stretch', key=f"top_shareholders_pie_{symbol}")
+            st.plotly_chart(fig, width='stretch')
 
 def display_model_analysis(model_results):
     """显示模型分析结果"""
