@@ -30,6 +30,39 @@ st.set_page_config(
 # 近期关注功能相关函数
 import json
 from collections import defaultdict
+import os
+from pathlib import Path
+
+def load_recent_stocks_config():
+    """加载近期关注模块配置（从环境变量）"""
+    try:
+        # 从环境变量读取配置，支持类型转换
+        max_records = int(os.getenv('RECENT_STOCKS_MAX_RECORDS_PER_STOCK', '0'))
+        auto_cleanup = int(os.getenv('RECENT_STOCKS_AUTO_CLEANUP_DAYS', '30'))
+        max_total = int(os.getenv('RECENT_STOCKS_MAX_TOTAL_RECORDS', '1000'))
+        
+        config = {
+            'max_records_per_stock': max_records,
+            'auto_cleanup_days': auto_cleanup,
+            'max_total_records': max_total
+        }
+        
+        # 验证配置合理性
+        if config['max_records_per_stock'] < 0:
+            config['max_records_per_stock'] = 0
+        if config['auto_cleanup_days'] < 0:
+            config['auto_cleanup_days'] = 30
+        if config['max_total_records'] < 0:
+            config['max_total_records'] = 1000
+            
+        return config
+    except Exception as e:
+        print(f"⚠️ 加载环境变量配置失败，使用默认配置: {e}")
+        return {
+            'max_records_per_stock': 0,
+            'auto_cleanup_days': 30,
+            'max_total_records': 1000
+        }
 
 def load_recent_stocks():
     """加载近期关注股票数据"""
@@ -43,6 +76,55 @@ def load_recent_stocks():
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
+def auto_cleanup_recent_stocks(recent_stocks, config):
+    """自动清理过期记录和限制总记录数"""
+    if not recent_stocks:
+        return recent_stocks
+    
+    cleaned_stocks = {}
+    total_records = 0
+    current_time = datetime.now().timestamp()
+    
+    # 清理过期记录
+    cleanup_days = config['auto_cleanup_days']
+    max_total_records = config['max_total_records']
+    
+    for symbol, records in recent_stocks.items():
+        if not records:
+            continue
+            
+        # 过滤过期记录
+        if cleanup_days > 0:
+            cutoff_time = current_time - (cleanup_days * 24 * 3600)
+            records = [r for r in records if r['timestamp'] > cutoff_time]
+        
+        if records:
+            cleaned_stocks[symbol] = records
+            total_records += len(records)
+    
+    # 限制总记录数
+    if max_total_records > 0 and total_records > max_total_records:
+        # 按时间排序所有记录
+        all_records = []
+        for symbol, records in cleaned_stocks.items():
+            for record in records:
+                record['_symbol'] = symbol
+                all_records.append(record)
+        
+        # 按时间戳排序，保留最新的记录
+        all_records.sort(key=lambda x: x['timestamp'])
+        records_to_keep = all_records[-max_total_records:]
+        
+        # 重新组织数据
+        cleaned_stocks = {}
+        for record in records_to_keep:
+            symbol = record.pop('_symbol')
+            if symbol not in cleaned_stocks:
+                cleaned_stocks[symbol] = []
+            cleaned_stocks[symbol].append(record)
+    
+    return cleaned_stocks
+
 def save_recent_stocks(recent_stocks):
     """保存近期关注股票数据"""
     try:
@@ -50,8 +132,14 @@ def save_recent_stocks(recent_stocks):
         data_dir = Path(__file__).parent.parent / 'data' / 'recent_stocks'
         data_dir.mkdir(exist_ok=True, parents=True)  # 确保目录存在，包括父目录
         file_path = data_dir / 'recent_stocks.json'
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(recent_stocks, f, ensure_ascii=False, indent=2)
+        
+        # 优化存储：如果数据量过大，使用更紧凑的格式
+        if len(str(recent_stocks)) > 100000:  # 超过100KB时使用紧凑格式
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(recent_stocks, f, ensure_ascii=False, separators=(',', ':'))
+        else:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(recent_stocks, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"保存近期关注数据失败: {e}")
 
@@ -64,7 +152,7 @@ def is_valid_stock(symbol, data_provider):
     except:
         return False
 
-def add_recent_stock(symbol, stock_name, data_provider):
+def add_recent_stock(symbol, stock_name, data_provider, query_module=None):
     """添加股票到近期关注列表（只添加真实存在的股票）"""
     # 验证股票是否真实存在
     if not is_valid_stock(symbol, data_provider):
@@ -72,6 +160,7 @@ def add_recent_stock(symbol, stock_name, data_provider):
         return
     
     recent_stocks = load_recent_stocks()
+    config = load_recent_stocks_config()
     
     if symbol not in recent_stocks:
         recent_stocks[symbol] = []
@@ -82,14 +171,20 @@ def add_recent_stock(symbol, stock_name, data_provider):
         "stock_name": stock_name,
         "data_provider": data_provider,
         "query_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "symbol": symbol
+        "symbol": symbol,
+        "query_module": query_module or "未知模块"  # 记录查询来源模块
     }
     
     recent_stocks[symbol].append(new_record)
     
-    # 限制每个股票最多保留10条记录
-    if len(recent_stocks[symbol]) > 10:
-        recent_stocks[symbol] = recent_stocks[symbol][-10:]
+    # 应用配置限制
+    max_records = config['max_records_per_stock']
+    if max_records > 0 and len(recent_stocks[symbol]) > max_records:
+        # 保留最新的记录
+        recent_stocks[symbol] = recent_stocks[symbol][-max_records:]
+    
+    # 自动清理过期记录
+    recent_stocks = auto_cleanup_recent_stocks(recent_stocks, config)
     
     save_recent_stocks(recent_stocks)
 
@@ -599,7 +694,7 @@ def main():
             
             # 记录查询历史（除了近期关注模块本身）
             if function_module != "近期关注":
-                add_recent_stock(symbol, stock_name, data_provider)
+                add_recent_stock(symbol, stock_name, data_provider, function_module)
             
             # 历史数据模块
             if run_history:
@@ -2429,11 +2524,20 @@ def display_recent_stocks():
             
             # 显示查询记录
             records_df = pd.DataFrame(stock_records)
-            records_df = records_df[['query_time', 'data_provider']]
-            records_df.columns = ['查询时间', '数据源']
+            # 确保query_module字段存在（兼容旧数据）
+            if 'query_module' not in records_df.columns:
+                records_df['query_module'] = '未知模块'
+            records_df = records_df[['query_time', 'data_provider', 'query_module']]
+            records_df.columns = ['查询时间', '数据源', '查询模块']
             records_df = records_df.sort_values('查询时间', ascending=False)
             
             st.dataframe(records_df, width='stretch', hide_index=True)
+            
+            # 显示查询模块统计
+            st.subheader("📊 查询模块统计")
+            module_stats = records_df['查询模块'].value_counts()
+            for module, count in module_stats.items():
+                st.write(f"- **{module}**: {count} 次")
     
     # 隐藏管理功能（注释掉相关代码）
     # st.markdown("---")
