@@ -525,42 +525,17 @@ def main():
             show_intraday = False
             show_basic_info = False
         elif function_module == "基本信息":
-            run_button = st.button("🏢 查看基本信息", type="primary")
-            run_backtest = False
-            run_model_only = False
-            show_intraday = False
-            show_basic_info = run_button
+            # 基本信息模块：选择时立即运行，无需按钮
+            show_basic_info = True
+            st.info("🏢 正在显示基本信息...")
         elif function_module == "逐笔交易":
-            # 使用session state来保持逐笔交易显示状态
-            if 'show_intraday' not in st.session_state:
-                st.session_state.show_intraday = False
-            
-            run_button = st.button("📊 查看逐笔交易", type="primary")
-            
-            # 如果点击了按钮，设置session state
-            if run_button:
-                st.session_state.show_intraday = True
-            
-            run_backtest = False
-            run_model_only = False
-            show_intraday = st.session_state.show_intraday
-            show_basic_info = False
+            # 逐笔交易模块：选择时立即运行，无需按钮
+            show_intraday = True
+            st.info("📊 正在显示逐笔交易...")
         elif function_module == "近期关注":
-            # 使用session state来保持近期关注显示状态
-            if 'show_recent' not in st.session_state:
-                st.session_state.show_recent = False
-            
-            run_button = st.button("⭐ 查看近期关注", type="primary")
-            
-            # 如果点击了按钮，设置session state
-            if run_button:
-                st.session_state.show_recent = True
-            
-            run_backtest = False
-            run_model_only = False
-            show_intraday = False
-            show_basic_info = False
-            show_recent = st.session_state.show_recent
+            # 近期关注模块：选择时立即运行，无需按钮
+            show_recent = True
+            st.info("⭐ 正在显示近期关注...")
     
     # 主内容区域
     # 确保所有变量都已定义
