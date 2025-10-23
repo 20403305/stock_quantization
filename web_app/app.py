@@ -208,7 +208,7 @@ def main():
         st.subheader("功能模块")
         function_module = st.radio(
             "选择分析功能",
-            ["回测分析", "AI诊股", "基本信息", "逐笔交易"],
+            ["历史数据", "回测分析", "AI诊股", "基本信息", "逐笔交易"],
             help="选择不同的分析功能模块"
         )
         
@@ -345,6 +345,33 @@ def main():
             strategy_params = {'short_period': 5, 'long_period': 20}
             enable_model_analysis = True
         
+        # 历史数据模块参数
+        elif function_module == "历史数据":
+            st.subheader("📊 历史数据参数")
+            
+            # 时间范围
+            st.write("时间范围")
+            col1, col2 = st.columns(2)
+            with col1:
+                start_date = st.date_input(
+                    "开始日期", 
+                    value=datetime.now() - timedelta(days=365),
+                    max_value=datetime.now()
+                )
+            with col2:
+                end_date = st.date_input(
+                    "结束日期", 
+                    value=datetime.now(),
+                    max_value=datetime.now()
+                )
+            
+            # 为历史数据设置默认值
+            strategy_name = "移动平均策略"
+            strategy_params = {}
+            enable_model_analysis = False
+            model_platform = "local"
+            selected_model = "deepseek-r1:7b"
+        
         # 基本信息和逐笔交易不需要额外参数
         else:
             # 设置默认值
@@ -359,7 +386,23 @@ def main():
         # 运行按钮
         st.subheader("执行操作")
         
-        if function_module == "回测分析":
+        if function_module == "历史数据":
+            # 使用session state来保持历史数据显示状态
+            if 'show_history' not in st.session_state:
+                st.session_state.show_history = False
+            
+            run_button = st.button("📈 查看历史数据", type="primary")
+            
+            # 如果点击了按钮，设置session state
+            if run_button:
+                st.session_state.show_history = True
+            
+            run_history = st.session_state.show_history
+            run_backtest = False
+            run_model_only = False
+            show_intraday = False
+            show_basic_info = False
+        elif function_module == "回测分析":
             run_button = st.button("🚀 运行回测分析", type="primary")
             run_backtest = run_button
             run_model_only = False
@@ -394,7 +437,19 @@ def main():
             show_basic_info = False
     
     # 主内容区域
-    if run_backtest or run_model_only or show_intraday or show_basic_info:
+    # 确保所有变量都已定义
+    if 'run_history' not in locals():
+        run_history = False
+    if 'run_backtest' not in locals():
+        run_backtest = False
+    if 'run_model_only' not in locals():
+        run_model_only = False
+    if 'show_intraday' not in locals():
+        show_intraday = False
+    if 'show_basic_info' not in locals():
+        show_basic_info = False
+    
+    if run_history or run_backtest or run_model_only or show_intraday or show_basic_info:
         # 确保变量已定义
         if 'symbol' not in locals():
             symbol = "600519"  # 默认股票代码
@@ -407,10 +462,32 @@ def main():
             model_platform = "local"
         if 'selected_model' not in locals():
             selected_model = "deepseek-r1:7b"
+        if 'kline_type' not in locals():
+            kline_type = "日K"
+        if 'indicator1' not in locals():
+            indicator1 = "KDJ"
+        if 'indicator2' not in locals():
+            indicator2 = "MACD"
+        if 'ma_periods' not in locals():
+            ma_periods = [5, 10, 20, 30]
             
         with st.spinner("正在获取数据和运行分析..."):
             # 获取股票名称
             stock_name = get_stock_name(symbol, data_provider)
+            
+            # 历史数据模块
+            if run_history:
+                # 获取历史数据
+                data = load_stock_data(symbol, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), data_provider)
+                
+                if data.empty:
+                    st.error("❌ 无法获取数据，请检查股票代码或日期范围")
+                    return
+                
+                # 显示历史数据图表
+                display_history_data(data, symbol, stock_name)
+                # 不要立即返回，让用户可以选择图表设置
+                # 只有当用户明确选择其他功能时才重置状态
             
             # 显示基本信息（所有功能都显示）
             if show_basic_info:
@@ -438,14 +515,6 @@ def main():
                 if data.empty:
                     st.error("❌ 无法获取数据，请检查股票代码或日期范围")
                     return
-                
-                # 显示基本信息（回测和AI诊股都显示）
-                try:
-                    company_info = cached_get_company_info(symbol, data_provider)
-                    if company_info:
-                        display_company_info(company_info)
-                except Exception as e:
-                    st.warning(f"⚠️ 获取上市公司信息失败: {e}")
                 
                 # AI诊股功能
                 if run_model_only:
@@ -655,7 +724,7 @@ def display_results(data, results, symbol, strategy_name, stock_name, model_resu
     fig.update_yaxes(title_text="资产价值", row=2, col=1)
     fig.update_yaxes(title_text="回撤%", row=3, col=1)
     
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(fig, width='stretch', key="backtest_performance_chart")
     
     # 交易记录
     if 'trades' in results and not results['trades'].empty:
@@ -868,7 +937,7 @@ def display_quarterly_profit(symbol):
             height=400
         )
         
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width='stretch', key=f"top_shareholders_pie_{symbol}")
 
 def display_quarterly_cashflow(symbol):
     """显示季度现金流数据"""
@@ -953,7 +1022,7 @@ def display_quarterly_cashflow(symbol):
             height=400
         )
         
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width='stretch', key=f"top_shareholders_pie_{symbol}")
 
 def display_performance_forecast(symbol):
     """显示业绩预告数据"""
@@ -1009,7 +1078,7 @@ def display_performance_forecast(symbol):
             height=400
         )
         
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width='stretch', key=f"top_shareholders_pie_{symbol}")
 
 def display_fund_holdings(symbol):
     """显示基金持股数据"""
@@ -1096,7 +1165,7 @@ def display_fund_holdings(symbol):
             xaxis_tickangle=-45
         )
         
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width='stretch', key=f"top_shareholders_pie_{symbol}")
 
 def display_top_shareholders(symbol):
     """显示十大股东数据"""
@@ -1190,7 +1259,7 @@ def display_top_shareholders(symbol):
                 title=f"{latest_date} 十大股东持股比例分布"
             )
             
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, width='stretch', key=f"top_shareholders_pie_{symbol}")
 
 def display_model_analysis(model_results):
     """显示模型分析结果"""
@@ -1631,7 +1700,7 @@ def display_intraday_trades(symbol, stock_name):
         fig.update_yaxes(title_text="价格(元)", row=1, col=1)
         fig.update_yaxes(title_text="成交量(股)", row=2, col=1)
         
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width='stretch', key=f"top_shareholders_pie_{symbol}")
         
         # 新增价格-成交量分布图
         st.subheader("📊 价格-成交量分布图")
@@ -1724,6 +1793,437 @@ def display_intraday_trades(symbol, stock_name):
             # 重置session state，返回主界面
             st.session_state.show_intraday = False
             st.rerun()
+
+def display_history_data(data, symbol, stock_name):
+    """显示历史数据图表"""
+    st.header(f"📊 {symbol} ({stock_name}) - 历史数据分析")
+    
+    # 默认显示所有移动平均线
+    default_ma_periods = [5, 10, 20, 30]
+    
+    # 1. K线图模块 - 内部使用选项卡
+    st.subheader("📈 K线图")
+    
+    # K线图内部选项卡
+    kline_tab_daily, kline_tab_weekly, kline_tab_monthly, kline_tab_5day = st.tabs(["日K", "周K", "月K", "五日"])
+    
+    with kline_tab_daily:
+        create_kline_chart(data, symbol, stock_name, "日K", default_ma_periods, "daily")
+    
+    with kline_tab_weekly:
+        create_kline_chart(data, symbol, stock_name, "周K", default_ma_periods, "weekly")
+    
+    with kline_tab_monthly:
+        create_kline_chart(data, symbol, stock_name, "月K", default_ma_periods, "monthly")
+    
+    with kline_tab_5day:
+        create_kline_chart(data, symbol, stock_name, "五日", default_ma_periods, "5day")
+    
+    st.markdown("---")
+    
+    # 2. 指标图1模块 - 内部使用选项卡
+    st.subheader("📊 指标图1")
+    
+    # 指标图1内部选项卡
+    indicator1_tab_macd, indicator1_tab_kdj, indicator1_tab_rsi, indicator1_tab_boll, indicator1_tab_volume, indicator1_tab_amount = st.tabs([
+        "MACD", "KDJ", "RSI", "BOLL", "成交量", "成交额"
+    ])
+    
+    with indicator1_tab_macd:
+        create_single_indicator_chart(data, "MACD", 1)
+    
+    with indicator1_tab_kdj:
+        create_single_indicator_chart(data, "KDJ", 1)
+    
+    with indicator1_tab_rsi:
+        create_single_indicator_chart(data, "RSI", 1)
+    
+    with indicator1_tab_boll:
+        create_single_indicator_chart(data, "BOLL", 1)
+    
+    with indicator1_tab_volume:
+        create_single_indicator_chart(data, "成交量", 1)
+    
+    with indicator1_tab_amount:
+        create_single_indicator_chart(data, "成交额", 1)
+    
+    st.markdown("---")
+    
+    # 3. 指标图2模块 - 内部使用选项卡
+    st.subheader("📊 指标图2")
+    
+    # 指标图2内部选项卡
+    indicator2_tab_macd, indicator2_tab_kdj, indicator2_tab_rsi, indicator2_tab_boll, indicator2_tab_volume, indicator2_tab_amount = st.tabs([
+        "MACD", "KDJ", "RSI", "BOLL", "成交量", "成交额"
+    ])
+    
+    with indicator2_tab_macd:
+        create_single_indicator_chart(data, "MACD", 2)
+    
+    with indicator2_tab_kdj:
+        create_single_indicator_chart(data, "KDJ", 2)
+    
+    with indicator2_tab_rsi:
+        create_single_indicator_chart(data, "RSI", 2)
+    
+    with indicator2_tab_boll:
+        create_single_indicator_chart(data, "BOLL", 2)
+    
+    with indicator2_tab_volume:
+        create_single_indicator_chart(data, "成交量", 2)
+    
+    with indicator2_tab_amount:
+        create_single_indicator_chart(data, "成交额", 2)
+    
+    st.markdown("---")
+    
+    # 4. 数据统计模块
+    st.subheader("📋 数据统计")
+    display_data_statistics(data)
+
+def create_kline_chart_with_controls(data, symbol, stock_name):
+    """创建K线图，包含K线类型和移动平均线选择"""
+    st.subheader("📈 K线图")
+    
+    # K线图控制面板 - 放在K线图上方
+    col1, col2, col3 = st.columns([1, 1, 2])
+    
+    with col1:
+        # K线类型选择 - 使用session state作为默认值，但不立即更新
+        kline_type = st.selectbox(
+            "K线类型",
+            ["日K", "周K", "月K", "五日"],
+            index=["日K", "周K", "月K", "五日"].index(st.session_state.kline_type),
+            key="kline_type_selector"
+        )
+    
+    with col2:
+        # 移动平均线设置
+        show_ma = st.checkbox("显示均线", value=st.session_state.show_ma, key="show_ma_checkbox")
+        
+        if show_ma:
+            ma_periods = st.multiselect(
+                "均线周期",
+                [5, 10, 20, 30, 60],
+                default=st.session_state.ma_periods,
+                key="ma_periods_selector"
+            )
+        else:
+            ma_periods = []
+    
+    with col3:
+        # 图表操作
+        st.write("")
+        if st.button("🔄 应用设置", key="apply_kline_settings"):
+            # 只在点击应用按钮时更新session state
+            st.session_state.kline_type = kline_type
+            st.session_state.show_ma = show_ma
+            if show_ma:
+                st.session_state.ma_periods = ma_periods
+            st.rerun()
+    
+    # 创建K线图
+    create_kline_chart(data, symbol, stock_name, st.session_state.kline_type, st.session_state.ma_periods if st.session_state.show_ma else [])
+
+def create_indicator1_chart_with_controls(data):
+    """创建指标图1，包含指标选择"""
+    st.subheader("📊 指标图1")
+    
+    # 指标图1控制面板
+    col1, col2 = st.columns([1, 3])
+    
+    with col1:
+        # 指标选择 - 使用session state作为默认值，但不立即更新
+        indicator1 = st.selectbox(
+            "选择指标",
+            ["KDJ", "MACD", "RSI", "BOLL", "成交量", "成交额"],
+            index=["KDJ", "MACD", "RSI", "BOLL", "成交量", "成交额"].index(st.session_state.indicator1),
+            key="indicator1_selector"
+        )
+    
+    with col2:
+        # 图表操作
+        st.write("")
+        if st.button("🔄 应用设置", key="apply_indicator1_settings"):
+            # 只在点击应用按钮时更新session state
+            st.session_state.indicator1 = indicator1
+            st.rerun()
+    
+    # 创建指标图1
+    create_single_indicator_chart(data, st.session_state.indicator1, 1)
+
+def create_indicator2_chart_with_controls(data):
+    """创建指标图2，包含指标选择"""
+    st.subheader("📊 指标图2")
+    
+    # 指标图2控制面板
+    col1, col2 = st.columns([1, 3])
+    
+    with col1:
+        # 指标选择 - 使用session state作为默认值，但不立即更新
+        indicator2 = st.selectbox(
+            "选择指标",
+            ["KDJ", "MACD", "RSI", "BOLL", "成交量", "成交额"],
+            index=["KDJ", "MACD", "RSI", "BOLL", "成交量", "成交额"].index(st.session_state.indicator2),
+            key="indicator2_selector"
+        )
+    
+    with col2:
+        # 图表操作
+        st.write("")
+        if st.button("🔄 应用设置", key="apply_indicator2_settings"):
+            # 只在点击应用按钮时更新session state
+            st.session_state.indicator2 = indicator2
+            st.rerun()
+    
+    # 创建指标图2
+    create_single_indicator_chart(data, st.session_state.indicator2, 2)
+
+def create_kline_chart(data, symbol, stock_name, kline_type, ma_periods, chart_key=""):
+    """创建K线图"""
+    # 移除重复的标题，因为已经在外部显示了
+    
+    # 根据K线类型重采样数据
+    if kline_type == "周K":
+        # 按周重采样
+        resampled_data = data.resample('W').agg({
+            'Open': 'first',
+            'High': 'max', 
+            'Low': 'min',
+            'Close': 'last',
+            'Volume': 'sum'
+        }).dropna()
+    elif kline_type == "月K":
+        # 按月重采样
+        resampled_data = data.resample('M').agg({
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min', 
+            'Close': 'last',
+            'Volume': 'sum'
+        }).dropna()
+    elif kline_type == "五日":
+        # 按5日重采样
+        resampled_data = data.resample('5D').agg({
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last',
+            'Volume': 'sum'
+        }).dropna()
+    else:
+        # 日K线，使用原始数据
+        resampled_data = data
+    
+    # 创建K线图
+    fig = go.Figure()
+    
+    # 添加K线
+    fig.add_trace(go.Candlestick(
+        x=resampled_data.index,
+        open=resampled_data['Open'],
+        high=resampled_data['High'],
+        low=resampled_data['Low'],
+        close=resampled_data['Close'],
+        name='K线'
+    ))
+    
+    # 添加移动平均线
+    for period in ma_periods:
+        ma_data = resampled_data['Close'].rolling(window=period).mean()
+        fig.add_trace(go.Scatter(
+            x=resampled_data.index,
+            y=ma_data,
+            name=f'MA{period}',
+            line=dict(width=2)
+        ))
+    
+    # 更新图表布局
+    fig.update_layout(
+        title=f"{symbol} ({stock_name}) {kline_type}线图",
+        xaxis_title="日期",
+        yaxis_title="价格(元)",
+        height=500,
+        showlegend=True
+    )
+    
+    # 显示图表
+    st.plotly_chart(fig, use_container_width=True, key=f"kline_chart_{symbol}_{chart_key}")
+
+def create_single_indicator_chart(data, indicator, chart_number):
+    """创建单个指标图"""
+    # 创建图表
+    fig = go.Figure()
+    
+    # 计算并添加指标
+    add_indicator_to_chart(fig, data, indicator)
+    
+    # 更新布局
+    fig.update_layout(
+        title=f"{indicator}指标",
+        height=300,
+        showlegend=True
+    )
+    
+    # 显示图表
+    st.plotly_chart(fig, use_container_width=True, key=f"indicator_chart_{indicator}_{chart_number}")
+
+def add_indicator_to_chart(fig, data, indicator):
+    """添加指标到图表"""
+    if indicator == "KDJ":
+        # 计算KDJ指标
+        kdj_data = calculate_kdj(data)
+        if kdj_data is not None:
+            fig.add_trace(go.Scatter(x=data.index, y=kdj_data['K'], name='K值', line=dict(color='blue')))
+            fig.add_trace(go.Scatter(x=data.index, y=kdj_data['D'], name='D值', line=dict(color='red')))
+            fig.add_trace(go.Scatter(x=data.index, y=kdj_data['J'], name='J值', line=dict(color='green')))
+    
+    elif indicator == "MACD":
+        # 计算MACD指标
+        macd_data = calculate_macd(data)
+        if macd_data is not None:
+            fig.add_trace(go.Scatter(x=data.index, y=macd_data['MACD'], name='MACD', line=dict(color='blue')))
+            fig.add_trace(go.Scatter(x=data.index, y=macd_data['Signal'], name='信号线', line=dict(color='red')))
+            # 添加MACD柱状图
+            colors = ['green' if val >= 0 else 'red' for val in macd_data['Histogram']]
+            fig.add_trace(go.Bar(x=data.index, y=macd_data['Histogram'], name='MACD柱', marker_color=colors))
+    
+    elif indicator == "RSI":
+        # 计算RSI指标
+        rsi_data = calculate_rsi(data)
+        if rsi_data is not None:
+            fig.add_trace(go.Scatter(x=data.index, y=rsi_data, name='RSI', line=dict(color='purple')))
+            # 添加超买超卖线
+            fig.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="超买线")
+            fig.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="超卖线")
+    
+    elif indicator == "BOLL":
+        # 计算布林带
+        boll_data = calculate_bollinger_bands(data)
+        if boll_data is not None:
+            fig.add_trace(go.Scatter(x=data.index, y=boll_data['Upper'], name='上轨', line=dict(color='red', dash='dash')))
+            fig.add_trace(go.Scatter(x=data.index, y=boll_data['Middle'], name='中轨', line=dict(color='blue')))
+            fig.add_trace(go.Scatter(x=data.index, y=boll_data['Lower'], name='下轨', line=dict(color='green', dash='dash')))
+            fig.add_trace(go.Scatter(x=data.index, y=data['Close'], name='收盘价', line=dict(color='orange')))
+    
+    elif indicator == "成交量":
+        # 成交量图
+        fig.add_trace(go.Bar(x=data.index, y=data['Volume'], name='成交量', marker_color='orange'))
+    
+    elif indicator == "成交额":
+        # 成交额图（需要计算成交额）
+        if 'Volume' in data.columns and 'Close' in data.columns:
+            turnover = data['Volume'] * data['Close']
+            fig.add_trace(go.Bar(x=data.index, y=turnover, name='成交额', marker_color='purple'))
+
+def calculate_kdj(data, n=9, m1=3, m2=3):
+    """计算KDJ指标"""
+    try:
+        # 计算RSV值
+        low_min = data['Low'].rolling(window=n).min()
+        high_max = data['High'].rolling(window=n).max()
+        rsv = (data['Close'] - low_min) / (high_max - low_min) * 100
+        
+        # 计算K值
+        k = rsv.ewm(span=m1).mean()
+        # 计算D值
+        d = k.ewm(span=m2).mean()
+        # 计算J值
+        j = 3 * k - 2 * d
+        
+        return pd.DataFrame({'K': k, 'D': d, 'J': j})
+    except Exception as e:
+        st.warning(f"KDJ计算失败: {e}")
+        return None
+
+def calculate_macd(data, fast=12, slow=26, signal=9):
+    """计算MACD指标"""
+    try:
+        # 计算快慢EMA
+        ema_fast = data['Close'].ewm(span=fast).mean()
+        ema_slow = data['Close'].ewm(span=slow).mean()
+        
+        # 计算MACD线
+        macd = ema_fast - ema_slow
+        # 计算信号线
+        signal_line = macd.ewm(span=signal).mean()
+        # 计算柱状图
+        histogram = macd - signal_line
+        
+        return pd.DataFrame({
+            'MACD': macd,
+            'Signal': signal_line,
+            'Histogram': histogram
+        })
+    except Exception as e:
+        st.warning(f"MACD计算失败: {e}")
+        return None
+
+def calculate_rsi(data, period=14):
+    """计算RSI指标"""
+    try:
+        delta = data['Close'].diff()
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        
+        avg_gain = gain.rolling(window=period).mean()
+        avg_loss = loss.rolling(window=period).mean()
+        
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        
+        return rsi
+    except Exception as e:
+        st.warning(f"RSI计算失败: {e}")
+        return None
+
+def calculate_bollinger_bands(data, period=20, std=2):
+    """计算布林带"""
+    try:
+        middle = data['Close'].rolling(window=period).mean()
+        std_dev = data['Close'].rolling(window=period).std()
+        
+        upper = middle + std * std_dev
+        lower = middle - std * std_dev
+        
+        return pd.DataFrame({
+            'Upper': upper,
+            'Middle': middle,
+            'Lower': lower
+        })
+    except Exception as e:
+        st.warning(f"布林带计算失败: {e}")
+        return None
+
+def display_data_statistics(data):
+    """显示数据统计信息"""
+    # 移除重复的标题，因为已经在调用函数中显示了
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("数据天数", len(data))
+    
+    with col2:
+        st.metric("起始日期", data.index[0].strftime('%Y-%m-%d'))
+    
+    with col3:
+        st.metric("结束日期", data.index[-1].strftime('%Y-%m-%d'))
+    
+    with col4:
+        price_change = ((data['Close'].iloc[-1] - data['Close'].iloc[0]) / data['Close'].iloc[0]) * 100
+        st.metric("期间涨跌幅", f"{price_change:.2f}%")
+    
+    # 详细统计信息
+    with st.expander("📊 详细统计信息"):
+        st.write("**价格统计:**")
+        price_stats = data['Close'].describe()
+        st.write(price_stats)
+        
+        st.write("**成交量统计:**")
+        if 'Volume' in data.columns:
+            volume_stats = data['Volume'].describe()
+            st.write(volume_stats)
 
 if __name__ == "__main__":
     main()
