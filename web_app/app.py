@@ -33,6 +33,9 @@ import json
 from collections import defaultdict
 import os
 from pathlib import Path
+import hashlib
+import time
+import re
 
 def load_recent_stocks_config():
     """加载近期关注模块配置（从环境变量）"""
@@ -330,12 +333,1066 @@ def cached_get_top_shareholders(symbol):
     """获取十大股东数据（带缓存）"""
     return get_top_shareholders(symbol)
 
+# 投资笔记相关函数
+def load_notes_config():
+    """加载笔记模块配置"""
+    try:
+        # 从环境变量读取配置
+        max_notes_per_stock = int(os.getenv('NOTES_MAX_PER_STOCK', '100'))
+        max_note_length = int(os.getenv('NOTES_MAX_LENGTH', '2000'))
+        max_notes_total = int(os.getenv('NOTES_MAX_TOTAL', '5000'))
+        auto_cleanup_days = int(os.getenv('NOTES_AUTO_CLEANUP_DAYS', '365'))
+        write_interval = int(os.getenv('NOTES_WRITE_INTERVAL', '60'))  # 秒
+        
+        config = {
+            'max_notes_per_stock': max_notes_per_stock,
+            'max_note_length': max_note_length,
+            'max_notes_total': max_notes_total,
+            'auto_cleanup_days': auto_cleanup_days,
+            'write_interval': write_interval
+        }
+        
+        # 验证配置合理性
+        if config['max_notes_per_stock'] < 1:
+            config['max_notes_per_stock'] = 100
+        if config['max_note_length'] < 100:
+            config['max_note_length'] = 2000
+        if config['max_notes_total'] < 100:
+            config['max_notes_total'] = 5000
+        # 特殊处理：-1表示无时间限制，其他小于30的值设为365
+        if config['auto_cleanup_days'] != -1 and config['auto_cleanup_days'] < 30:
+            config['auto_cleanup_days'] = 365
+        if config['write_interval'] < 10:
+            config['write_interval'] = 60
+            
+        return config
+    except Exception as e:
+        print(f"⚠️ 加载笔记配置失败，使用默认配置: {e}")
+        return {
+            'max_notes_per_stock': 100,
+            'max_note_length': 2000,
+            'max_notes_total': 5000,
+            'auto_cleanup_days': 365,
+            'write_interval': 60
+        }
 
+def get_notes_file_path():
+    """获取笔记文件路径"""
+    data_dir = Path(__file__).parent.parent / 'data' / 'investment_notes'
+    data_dir.mkdir(exist_ok=True, parents=True)
+    return data_dir / 'investment_notes.json'
+
+def load_investment_notes():
+    """加载投资笔记数据"""
+    try:
+        file_path = get_notes_file_path()
+        if file_path.exists():
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save_investment_notes(notes_data):
+    """保存投资笔记数据"""
+    try:
+        file_path = get_notes_file_path()
+        
+        # 使用紧凑格式存储
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(notes_data, f, ensure_ascii=False, separators=(',', ':'))
+    except Exception as e:
+        print(f"保存投资笔记失败: {e}")
+
+def auto_cleanup_notes(notes_data, config):
+    """自动清理过期笔记和限制笔记数量"""
+    if not notes_data:
+        return notes_data
+    
+    cleaned_notes = {}
+    total_notes = 0
+    current_time = time.time()
+    
+    # 清理过期记录
+    cleanup_days = config['auto_cleanup_days']
+    max_total = config['max_notes_total']
+    max_per_stock = config['max_notes_per_stock']
+    
+    for symbol, notes in notes_data.items():
+        if not notes:
+            continue
+            
+        # 过滤过期记录：当 cleanup_days > 0 时进行清理，等于 -1 时表示无时间限制
+        if cleanup_days > 0:
+            cutoff_time = current_time - (cleanup_days * 24 * 3600)
+            notes = [n for n in notes if n['timestamp'] > cutoff_time]
+        # cleanup_days == -1 表示无时间限制，跳过清理
+        elif cleanup_days == -1:
+            # 无时间限制，保留所有记录
+            pass
+        # cleanup_days <= 0 且不等于 -1 时使用默认值
+        else:
+            # 使用默认的30天清理
+            cutoff_time = current_time - (30 * 24 * 3600)
+            notes = [n for n in notes if n['timestamp'] > cutoff_time]
+        
+        # 限制每只股票的笔记数量
+        if max_per_stock > 0 and len(notes) > max_per_stock:
+            # 保留最新的记录
+            notes = sorted(notes, key=lambda x: x['timestamp'], reverse=True)[:max_per_stock]
+        
+        if notes:
+            cleaned_notes[symbol] = notes
+            total_notes += len(notes)
+    
+    # 限制总笔记数量
+    if max_total > 0 and total_notes > max_total:
+        # 按时间排序，保留最新的
+        all_notes = []
+        for symbol, notes in cleaned_notes.items():
+            for note in notes:
+                note['symbol'] = symbol
+                all_notes.append(note)
+        
+        all_notes = sorted(all_notes, key=lambda x: x['timestamp'], reverse=True)[:max_total]
+        
+        # 重新组织数据
+        cleaned_notes = {}
+        for note in all_notes:
+            symbol = note.pop('symbol')
+            if symbol not in cleaned_notes:
+                cleaned_notes[symbol] = []
+            cleaned_notes[symbol].append(note)
+    
+    return cleaned_notes
+
+def validate_note_content(content, config):
+    """验证笔记内容"""
+    # 检查长度限制
+    if len(content) > config['max_note_length']:
+        return False, f"笔记内容过长，最大允许{config['max_note_length']}字符"
+    
+    # 检查内容是否为空或只有空白字符
+    if not content.strip():
+        return False, "笔记内容不能为空"
+    
+    # 检查是否包含恶意内容（简单过滤）
+    malicious_patterns = [
+        r'<script[^>]*>',
+        r'javascript:',
+        r'on\w+\s*=',
+        r'<iframe',
+        r'<object',
+        r'<embed'
+    ]
+    
+    for pattern in malicious_patterns:
+        if re.search(pattern, content, re.IGNORECASE):
+            return False, "笔记内容包含不安全内容"
+    
+    return True, "验证通过"
+
+def can_write_note(symbol, config):
+    """检查是否可以写入笔记（时间间隔限制）"""
+    if 'last_write_time' not in st.session_state:
+        st.session_state.last_write_time = {}
+    
+    last_time = st.session_state.last_write_time.get(symbol, 0)
+    current_time = time.time()
+    
+    if current_time - last_time < config['write_interval']:
+        return False, f"操作过于频繁，请等待{config['write_interval']}秒后再试"
+    
+    return True, "可以写入"
+
+def update_write_time(symbol):
+    """更新写入时间"""
+    if 'last_write_time' not in st.session_state:
+        st.session_state.last_write_time = {}
+    
+    st.session_state.last_write_time[symbol] = time.time()
+
+# 用户管理相关函数
+def get_users_file_path():
+    """获取用户数据文件路径"""
+    data_dir = Path(__file__).parent.parent / 'data' / 'users'
+    data_dir.mkdir(exist_ok=True, parents=True)
+    return data_dir / 'users.json'
+
+def load_users_config():
+    """加载用户管理配置"""
+    try:
+        # 从环境变量读取配置
+        admin_username = os.getenv('ADMIN_USERNAME', 'admin')
+        admin_password = os.getenv('ADMIN_PASSWORD', 'admin123')
+        max_applications_per_hour = int(os.getenv('MAX_APPLICATIONS_PER_HOUR', '1'))
+        application_expire_hours = int(os.getenv('APPLICATION_EXPIRE_HOURS', '24'))
+        
+        config = {
+            'admin_username': admin_username,
+            'admin_password': admin_password,
+            'max_applications_per_hour': max_applications_per_hour,
+            'application_expire_hours': application_expire_hours
+        }
+        
+        return config
+    except Exception as e:
+        print(f"⚠️ 加载用户配置失败，使用默认配置: {e}")
+        return {
+            'admin_username': 'admin',
+            'admin_password': 'admin123',
+            'max_applications_per_hour': 1,
+            'application_expire_hours': 24
+        }
+
+def load_users_data():
+    """加载用户数据"""
+    try:
+        file_path = get_users_file_path()
+        if file_path.exists():
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {
+            'admin_users': {},
+            'approved_users': {},
+            'pending_applications': {},
+            'application_history': {}
+        }
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {
+            'admin_users': {},
+            'approved_users': {},
+            'pending_applications': {},
+            'application_history': {}
+        }
+
+def save_users_data(users_data):
+    """保存用户数据"""
+    try:
+        file_path = get_users_file_path()
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(users_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"保存用户数据失败: {e}")
+
+def auto_cleanup_applications(users_data, config):
+    """自动清理过期申请记录"""
+    current_time = time.time()
+    expire_hours = config['application_expire_hours']
+    cutoff_time = current_time - (expire_hours * 3600)
+    
+    # 清理待处理申请
+    pending_applications = users_data.get('pending_applications', {})
+    cleaned_pending = {}
+    
+    for username, application in pending_applications.items():
+        if application.get('apply_time', 0) > cutoff_time:
+            cleaned_pending[username] = application
+    
+    users_data['pending_applications'] = cleaned_pending
+    
+    # 清理申请历史
+    application_history = users_data.get('application_history', {})
+    cleaned_history = {}
+    
+    for username, history in application_history.items():
+        if history.get('last_apply_time', 0) > cutoff_time:
+            cleaned_history[username] = history
+    
+    users_data['application_history'] = cleaned_history
+    
+    return users_data
+
+def can_submit_application(username, users_data, config):
+    """检查是否可以提交申请"""
+    # 检查是否已经是管理员或已批准用户
+    if username in users_data.get('admin_users', {}) or username in users_data.get('approved_users', {}):
+        return False, "该用户名已被使用"
+    
+    # 检查是否已有待处理申请
+    if username in users_data.get('pending_applications', {}):
+        return False, "该用户名已有待处理申请"
+    
+    # 检查申请频率限制
+    application_history = users_data.get('application_history', {})
+    user_history = application_history.get(username, {})
+    
+    current_time = time.time()
+    last_apply_time = user_history.get('last_apply_time', 0)
+    
+    # 1小时内只能提交一次申请
+    if current_time - last_apply_time < 3600:
+        wait_time = 3600 - int(current_time - last_apply_time)
+        return False, f"申请过于频繁，请等待{wait_time}秒后再试"
+    
+    # 检查每小时最大申请数量
+    max_per_hour = config['max_applications_per_hour']
+    if max_per_hour > 0:
+        hour_start = current_time - 3600
+        recent_applications = 0
+        
+        for app_username, app_data in users_data.get('pending_applications', {}).items():
+            if app_data.get('apply_time', 0) > hour_start:
+                recent_applications += 1
+        
+        if recent_applications >= max_per_hour:
+            return False, "当前申请人数过多，请稍后再试"
+    
+    return True, "可以提交申请"
+
+def setup_user_authentication():
+    """设置用户认证系统"""
+    # 初始化session state
+    if 'user_authenticated' not in st.session_state:
+        st.session_state.user_authenticated = False
+    if 'current_user' not in st.session_state:
+        st.session_state.current_user = None
+    if 'user_role' not in st.session_state:
+        st.session_state.user_role = None
+    
+    # 加载配置和数据
+    config = load_users_config()
+    users_data = load_users_data()
+    users_data = auto_cleanup_applications(users_data, config)
+    
+    # 检查是否已认证
+    if st.session_state.user_authenticated:
+        return True
+    
+    # 显示认证界面
+    st.header("🔐 用户认证")
+    
+    # 选择认证方式
+    auth_type = st.radio(
+        "选择认证方式",
+        ["管理员登录", "用户登录", "申请新用户"],
+        help="管理员使用预设账户，用户使用已批准账户，或申请新账户"
+    )
+    
+    if auth_type == "管理员登录":
+        return admin_login(config, users_data)
+    elif auth_type == "用户登录":
+        return user_login(users_data)
+    elif auth_type == "申请新用户":
+        return submit_application(users_data, config)
+    
+    return False
+
+def admin_login(config, users_data):
+    """管理员登录"""
+    st.subheader("👑 管理员登录")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        username = st.text_input("管理员用户名", value=config['admin_username'])
+    with col2:
+        password = st.text_input("管理员密码", type="password")
+    
+    if st.button("🔑 管理员登录"):
+        # 验证管理员凭据
+        if username == config['admin_username'] and password == config['admin_password']:
+            st.session_state.user_authenticated = True
+            st.session_state.current_user = username
+            st.session_state.user_role = "admin"
+            
+            # 记录管理员登录
+            if username not in users_data['admin_users']:
+                users_data['admin_users'][username] = {
+                    'last_login': time.time(),
+                    'login_count': 1
+                }
+            else:
+                users_data['admin_users'][username]['last_login'] = time.time()
+                users_data['admin_users'][username]['login_count'] += 1
+            
+            save_users_data(users_data)
+            st.success("✅ 管理员登录成功！")
+            st.rerun()
+        else:
+            st.error("❌ 用户名或密码错误")
+    
+    return False
+
+def user_login(users_data):
+    """用户登录"""
+    st.subheader("👤 用户登录")
+    
+    approved_users = users_data.get('approved_users', {})
+    
+    if not approved_users:
+        st.info("📝 暂无已批准的用户账户，请先申请新用户或联系管理员")
+        return False
+    
+    # 允许用户输入用户名
+    username = st.text_input("输入用户名", help="请输入您的用户名")
+    password = st.text_input("密码", type="password")
+    
+    if st.button("🔑 用户登录"):
+        user_data = approved_users.get(username)
+        if user_data and user_data.get('password_hash') == hashlib.sha256(password.encode()).hexdigest():
+            st.session_state.user_authenticated = True
+            st.session_state.current_user = username
+            st.session_state.user_role = "user"
+            
+            # 更新用户登录信息
+            user_data['last_login'] = time.time()
+            user_data['login_count'] = user_data.get('login_count', 0) + 1
+            
+            save_users_data(users_data)
+            st.success("✅ 用户登录成功！")
+            st.rerun()
+        else:
+            st.error("❌ 用户名或密码错误")
+    
+    return False
+
+def submit_application(users_data, config):
+    """提交新用户申请"""
+    st.subheader("📝 申请新用户")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        username = st.text_input("申请用户名", help="请输入您想使用的用户名")
+    with col2:
+        password = st.text_input("设置密码", type="password", help="请设置登录密码")
+    
+    confirm_password = st.text_input("确认密码", type="password")
+    
+    if st.button("📨 提交申请"):
+        # 验证输入
+        if not username or not password:
+            st.error("❌ 用户名和密码不能为空")
+            return False
+        
+        if len(username) < 3:
+            st.error("❌ 用户名长度至少3位")
+            return False
+        
+        if len(password) < 6:
+            st.error("❌ 密码长度至少6位")
+            return False
+        
+        if password != confirm_password:
+            st.error("❌ 两次输入的密码不一致")
+            return False
+        
+        # 检查是否可以提交申请
+        can_submit, submit_msg = can_submit_application(username, users_data, config)
+        if not can_submit:
+            st.error(f"❌ {submit_msg}")
+            return False
+        
+        # 提交申请
+        users_data['pending_applications'][username] = {
+            'password_hash': hashlib.sha256(password.encode()).hexdigest(),
+            'apply_time': time.time(),
+            'apply_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        # 更新申请历史
+        users_data['application_history'][username] = {
+            'last_apply_time': time.time(),
+            'apply_count': users_data['application_history'].get(username, {}).get('apply_count', 0) + 1
+        }
+        
+        save_users_data(users_data)
+        st.success("✅ 申请提交成功！请等待管理员审核")
+        st.info("📋 管理员将在24小时内处理您的申请，请耐心等待")
+    
+    return False
+
+def display_admin_panel():
+    """显示管理员面板"""
+    if st.session_state.user_role != "admin":
+        return
+    
+    st.header("👑 管理员面板")
+    
+    # 加载数据
+    users_data = load_users_data()
+    config = load_users_config()
+    users_data = auto_cleanup_applications(users_data, config)
+    
+    # 初始化新的用户状态列表
+    if 'pending_status_users' not in users_data:
+        users_data['pending_status_users'] = {}
+    if 'rejected_users' not in users_data:
+        users_data['rejected_users'] = {}
+    
+    # 显示待处理申请
+    st.subheader("📋 待处理申请")
+    pending_applications = users_data.get('pending_applications', {})
+    
+    if not pending_applications:
+        st.info("📭 暂无待处理申请")
+    else:
+        for username, application in pending_applications.items():
+            with st.expander(f"👤 {username} - {application.get('apply_date', '未知时间')}"):
+                # 显示申请信息
+                st.write(f"**申请时间:** {application.get('apply_date', '未知')}")
+                st.write(f"**申请理由:** {application.get('apply_reason', '无')}")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button(f"✅ 批准 {username}", key=f"approve_{username}"):
+                        # 批准申请
+                        users_data['approved_users'][username] = {
+                            'password_hash': application['password_hash'],
+                            'approve_time': time.time(),
+                            'approve_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            'approved_by': st.session_state.current_user,
+                            'original_apply_time': application.get('apply_time', time.time())
+                        }
+                        
+                        # 移除待处理申请
+                        del users_data['pending_applications'][username]
+                        
+                        # 重置用户申请时间限制
+                        if username in users_data.get('application_history', {}):
+                            users_data['application_history'][username]['last_apply_time'] = time.time()
+                        
+                        save_users_data(users_data)
+                        st.success(f"✅ 已批准用户 {username}")
+                        st.rerun()
+                
+                with col2:
+                    if st.button(f"❌ 拒绝 {username}", key=f"reject_{username}"):
+                        # 拒绝申请，移到已拒绝用户列表
+                        users_data['rejected_users'][username] = {
+                            'password_hash': application['password_hash'],
+                            'reject_time': time.time(),
+                            'reject_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            'rejected_by': st.session_state.current_user,
+                            'original_apply_time': application.get('apply_time', time.time()),
+                            'apply_reason': application.get('apply_reason', '无')
+                        }
+                        
+                        # 移除待处理申请
+                        del users_data['pending_applications'][username]
+                        save_users_data(users_data)
+                        st.success(f"✅ 已拒绝用户 {username}")
+                        st.rerun()
+    
+    # 显示已批准用户
+    st.subheader("👥 已批准用户")
+    approved_users = users_data.get('approved_users', {})
+    
+    if not approved_users:
+        st.info("📝 暂无已批准用户")
+    else:
+        for username, user_data in approved_users.items():
+            with st.expander(f"👤 {username} - 批准时间: {user_data.get('approve_date', '未知')}"):
+                st.write(f"**最后登录:** {datetime.fromtimestamp(user_data.get('last_login', 0)).strftime('%Y-%m-%d %H:%M:%S') if user_data.get('last_login') else '从未登录'}")
+                st.write(f"**登录次数:** {user_data.get('login_count', 0)}")
+                st.write(f"**批准人:** {user_data.get('approved_by', '未知')}")
+                
+                if st.button(f"🔄 撤回 {username}", key=f"revoke_{username}"):
+                    # 撤回用户，移到状态待定用户列表
+                    users_data['pending_status_users'][username] = {
+                        'password_hash': user_data['password_hash'],
+                        'revoke_time': time.time(),
+                        'revoke_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        'revoked_by': st.session_state.current_user,
+                        'original_approve_time': user_data.get('approve_time', time.time()),
+                        'original_approve_by': user_data.get('approved_by', '未知')
+                    }
+                    
+                    # 移除已批准用户
+                    del users_data['approved_users'][username]
+                    save_users_data(users_data)
+                    st.success(f"✅ 已撤回用户 {username}，用户状态变为待定")
+                    st.rerun()
+    
+    # 显示状态待定用户
+    st.subheader("⏳ 状态待定用户")
+    pending_status_users = users_data.get('pending_status_users', {})
+    
+    if not pending_status_users:
+        st.info("📝 暂无状态待定用户")
+    else:
+        for username, user_data in pending_status_users.items():
+            with st.expander(f"👤 {username} - 撤回时间: {user_data.get('revoke_date', '未知')}"):
+                st.write(f"**撤回时间:** {user_data.get('revoke_date', '未知')}")
+                st.write(f"**撤回人:** {user_data.get('revoked_by', '未知')}")
+                st.write(f"**原批准人:** {user_data.get('original_approve_by', '未知')}")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button(f"✅ 重新批准 {username}", key=f"reapprove_{username}"):
+                        # 重新批准用户
+                        users_data['approved_users'][username] = {
+                            'password_hash': user_data['password_hash'],
+                            'approve_time': time.time(),
+                            'approve_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            'approved_by': st.session_state.current_user,
+                            'reapprove_count': user_data.get('reapprove_count', 0) + 1
+                        }
+                        
+                        # 移除状态待定用户
+                        del users_data['pending_status_users'][username]
+                        save_users_data(users_data)
+                        st.success(f"✅ 已重新批准用户 {username}")
+                        st.rerun()
+                
+                with col2:
+                    if st.button(f"❌ 拒绝 {username}", key=f"reject_pending_{username}"):
+                        # 拒绝状态待定用户
+                        users_data['rejected_users'][username] = {
+                            'password_hash': user_data['password_hash'],
+                            'reject_time': time.time(),
+                            'reject_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            'rejected_by': st.session_state.current_user,
+                            'original_apply_time': user_data.get('original_approve_time', time.time()),
+                            'status': '从待定状态拒绝'
+                        }
+                        
+                        # 移除状态待定用户
+                        del users_data['pending_status_users'][username]
+                        save_users_data(users_data)
+                        st.success(f"✅ 已拒绝用户 {username}")
+                        st.rerun()
+    
+    # 显示已拒绝用户
+    st.subheader("❌ 已拒绝用户")
+    rejected_users = users_data.get('rejected_users', {})
+    
+    if not rejected_users:
+        st.info("📝 暂无已拒绝用户")
+    else:
+        for username, user_data in rejected_users.items():
+            with st.expander(f"👤 {username} - 拒绝时间: {user_data.get('reject_date', '未知')}"):
+                st.write(f"**拒绝时间:** {user_data.get('reject_date', '未知')}")
+                st.write(f"**拒绝人:** {user_data.get('rejected_by', '未知')}")
+                st.write(f"**拒绝原因:** {user_data.get('status', '无具体原因')}")
+                
+                if st.button(f"🔄 撤回拒绝 {username}", key=f"revoke_reject_{username}"):
+                    # 撤回拒绝，移到状态待定用户列表
+                    users_data['pending_status_users'][username] = {
+                        'password_hash': user_data['password_hash'],
+                        'revoke_time': time.time(),
+                        'revoke_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        'revoked_by': st.session_state.current_user,
+                        'original_reject_time': user_data.get('reject_time', time.time()),
+                        'original_reject_by': user_data.get('rejected_by', '未知'),
+                        'status': '从拒绝状态撤回'
+                    }
+                    
+                    # 移除已拒绝用户
+                    del users_data['rejected_users'][username]
+                    save_users_data(users_data)
+                    st.success(f"✅ 已撤回拒绝用户 {username}，用户状态变为待定")
+                    st.rerun()
+    
+    # 系统统计
+    st.subheader("📊 系统统计")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("待处理申请", len(pending_applications))
+    with col2:
+        st.metric("已批准用户", len(approved_users))
+    with col3:
+        st.metric("状态待定用户", len(pending_status_users))
+    with col4:
+        st.metric("已拒绝用户", len(rejected_users))
+
+def setup_password_protection():
+    """设置密码保护（兼容旧版本）"""
+    # 使用新的用户认证系统
+    if not setup_user_authentication():
+        return False
+    
+    # 如果是管理员，显示管理员面板
+    if st.session_state.user_role == "admin":
+        display_admin_panel()
+    
+    return True
+
+def display_all_notes_overview():
+    """显示所有笔记概览（无需登录）"""
+    st.header("📊 所有投资笔记概览")
+    
+    # 加载数据
+    notes_data = load_investment_notes()
+    config = load_notes_config()
+    
+    # 自动清理
+    notes_data = auto_cleanup_notes(notes_data, config)
+    
+    # 收集所有笔记
+    all_notes = []
+    for symbol, notes in notes_data.items():
+        for note in notes:
+            note['symbol'] = symbol
+            all_notes.append(note)
+    
+    if not all_notes:
+        st.info("📝 暂无投资笔记记录")
+        return
+    
+    # 按时间倒序排列
+    all_notes.sort(key=lambda x: x['timestamp'], reverse=True)
+    
+    # 搜索和过滤功能
+    st.subheader("🔍 搜索和过滤")
+    col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
+    with col1:
+        search_query = st.text_input("搜索笔记内容")
+    with col2:
+        tag_filter = st.selectbox("按标签过滤", ["全部"] + list(set(tag for note in all_notes for tag in note.get('tags', []))))
+    with col3:
+        stock_filter = st.selectbox("按股票过滤", ["全部"] + list(set(note['symbol'] for note in all_notes)))
+    with col4:
+        note_type_filter = st.selectbox("按类型过滤", ["全部", "股票笔记", "随心记"])
+    with col5:
+        author_filter = st.selectbox("按作者过滤", ["全部"] + list(set(note.get('author', '匿名用户') for note in all_notes)))
+    
+    # 过滤笔记
+    filtered_notes = all_notes
+    if search_query:
+        filtered_notes = [n for n in filtered_notes if search_query.lower() in n['content'].lower()]
+    if tag_filter != "全部":
+        filtered_notes = [n for n in filtered_notes if tag_filter in n.get('tags', [])]
+    if stock_filter != "全部":
+        filtered_notes = [n for n in filtered_notes if n['symbol'] == stock_filter]
+    if note_type_filter != "全部":
+        filtered_notes = [n for n in filtered_notes if n.get('note_type', '股票笔记') == note_type_filter]
+    if author_filter != "全部":
+        filtered_notes = [n for n in filtered_notes if n.get('author', '匿名用户') == author_filter]
+    
+    st.metric("找到笔记数量", len(filtered_notes))
+    
+    # 表格形式显示
+    st.subheader("📋 笔记表格概览")
+    
+    # 创建表格数据
+    table_data = []
+    for note in filtered_notes:
+        # 获取笔记类型
+        note_type = note.get('note_type', '股票笔记')
+        # 获取作者信息
+        author = note.get('author', '匿名用户')
+        user_role = note.get('user_role', 'user')
+        
+        table_data.append({
+            "股票代码": note['symbol'],
+            "股票名称": note.get('stock_name', '未知'),
+            "笔记类型": note_type,
+            "作者": f"{author} ({user_role})",
+            "创建时间": note['create_time'],
+            "情绪": note['sentiment'],
+            "标签": ", ".join(note.get('tags', [])),
+            "内容预览": note['content'][:100] + "..." if len(note['content']) > 100 else note['content']
+        })
+    
+    if table_data:
+        df = pd.DataFrame(table_data)
+        st.dataframe(df, use_container_width=True)
+        
+        # 显示详细内容
+        st.subheader("📄 详细笔记内容")
+        for i, note in enumerate(filtered_notes):
+            # 根据笔记类型设置不同的图标
+            note_type = note.get('note_type', '股票笔记')
+            note_icon = "📈" if note_type == "股票笔记" else "📝"
+            
+            with st.expander(f"{note_icon} {note['create_time']} - {note['symbol']} - {note['sentiment']} - {note_type}", expanded=i==0):
+                # 显示基本信息
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.write(f"**股票:** {note['symbol']} - {note.get('stock_name', '未知')}")
+                with col2:
+                    st.write(f"**情绪:** {note['sentiment']}")
+                with col3:
+                    st.write(f"**创建时间:** {note['create_time']}")
+                with col4:
+                    st.write(f"**笔记类型:** {note_type}")
+                
+                # 显示作者信息
+                if note.get('author'):
+                    user_role = note.get('user_role', 'user')
+                    role_emoji = "👑" if user_role == "admin" else "👤"
+                    st.write(f"{role_emoji} **作者:** {note['author']} ({user_role})")
+                
+                # 显示标签
+                if note.get('tags'):
+                    tag_html = " ".join([f"<span style='background-color: #e0e0e0; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; margin-right: 5px;'>{tag}</span>" for tag in note['tags']])
+                    st.markdown(f"🏷️ {tag_html}", unsafe_allow_html=True)
+                
+                # 显示内容
+                st.write("**笔记内容:**")
+                st.write(note['content'])
+    else:
+        st.info("🔍 没有找到匹配的笔记")
+
+def display_investment_notes(symbol, stock_name, data_provider):
+    """显示投资笔记界面"""
+    
+    # 如果是管理员，显示管理员面板
+    if st.session_state.get('user_authenticated', False) and st.session_state.get('user_role') == "admin":
+        # 管理员功能选择
+        admin_option = st.radio(
+            "👑 管理员功能",
+            ["投资笔记管理", "用户申请审核"],
+            help="选择管理员功能：管理投资笔记或审核用户申请"
+        )
+        
+        if admin_option == "用户申请审核":
+            display_admin_panel()
+            return
+        # 如果选择投资笔记管理，继续显示投资笔记功能
+    
+    # 显示所有笔记概览（无需登录）
+    if 'show_all_notes' not in st.session_state:
+        st.session_state.show_all_notes = False
+    
+    # 切换显示模式
+    view_mode = st.radio(
+        "选择查看模式",
+        ["当前股票笔记", "所有笔记概览"],
+        help="查看当前股票的笔记或所有股票的笔记概览"
+    )
+    
+    if view_mode == "所有笔记概览":
+        display_all_notes_overview()
+        return
+    
+    # 当前股票笔记需要登录验证（仅对写入功能）
+    st.header(f"📝 {stock_name}({symbol}) - 投资笔记")
+    
+    # 加载配置和数据
+    config = load_notes_config()
+    notes_data = load_investment_notes()
+    
+    # 自动清理
+    notes_data = auto_cleanup_notes(notes_data, config)
+    
+    # 获取当前股票的笔记
+    current_notes = notes_data.get(symbol, [])
+    
+    # 显示统计信息
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("笔记数量", len(current_notes))
+    with col2:
+        st.metric("最大长度", f"{config['max_note_length']}字符")
+    with col3:
+        st.metric("写入间隔", f"{config['write_interval']}秒")
+    
+    st.markdown("---")
+    
+    # 添加新笔记（需要登录）
+    st.subheader("✏️ 添加新笔记")
+    
+    # 检查是否已登录
+    if not st.session_state.get('user_authenticated', False):
+        st.info("🔐 请先登录以添加新笔记")
+        if st.button("🔑 前往登录"):
+            # 设置需要登录的标记，并在主函数中处理登录
+            st.session_state.need_login_for_notes = True
+            st.session_state.show_all_notes = False
+            st.rerun()
+    else:
+        # 检查写入限制
+        can_write, write_msg = can_write_note(symbol, config)
+        if not can_write:
+            st.warning(write_msg)
+        
+        # 显示当前用户
+        st.info(f"👤 当前用户: {st.session_state.current_user} ({st.session_state.user_role})")
+        
+        # 笔记类型选择
+        note_type = st.radio(
+            "笔记类型",
+            ["📈 股票笔记", "📝 随心记"],
+            help="选择笔记类型：股票笔记针对特定股票，随心记不针对特定股票"
+        )
+        
+        note_content = st.text_area(
+            "记录您的投资想法和心得",
+            height=150,
+            max_chars=config['max_note_length'],
+            disabled=not can_write,
+            help=f"最多{config['max_note_length']}字符，支持Markdown格式"
+        )
+        
+        # 显示字数统计
+        char_count = len(note_content)
+        st.caption(f"字数: {char_count}/{config['max_note_length']}")
+        
+        # 标签选择
+        tags = st.multiselect(
+            "选择标签",
+            ["技术分析", "基本面", "市场情绪", "风险提示", "买入信号", "卖出信号", "持有观察", "其他"],
+            help="为笔记添加分类标签"
+        )
+        
+        # 情绪选择
+        sentiment = st.select_slider(
+            "投资情绪",
+            options=["非常悲观", "悲观", "中性", "乐观", "非常乐观"],
+            value="中性",
+            help="记录当前的投资情绪"
+        )
+        
+        if st.button("💾 保存笔记", disabled=not can_write or not note_content.strip()):
+            # 验证内容
+            is_valid, valid_msg = validate_note_content(note_content, config)
+            if not is_valid:
+                st.error(valid_msg)
+                return
+            
+            # 创建新笔记（包含用户信息和笔记类型）
+            new_note = {
+                "timestamp": time.time(),
+                "content": note_content.strip(),
+                "tags": tags,
+                "sentiment": sentiment,
+                "symbol": symbol,
+                "stock_name": stock_name,
+                "create_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "author": st.session_state.current_user,
+                "user_role": st.session_state.user_role,
+                "note_type": "股票笔记" if note_type == "📈 股票笔记" else "随心记"
+            }
+            
+            # 添加到数据
+            if symbol not in notes_data:
+                notes_data[symbol] = []
+            
+            notes_data[symbol].append(new_note)
+            
+            # 保存数据
+            save_investment_notes(notes_data)
+            
+            # 更新写入时间
+            update_write_time(symbol)
+            
+            st.success("✅ 笔记保存成功！")
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # 显示现有笔记（无需登录）
+    st.subheader("📋 历史笔记")
+    
+    if not current_notes:
+        st.info("📝 暂无笔记记录，开始记录您的投资想法吧！")
+    else:
+        # 按时间倒序排列
+        current_notes.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        # 搜索和过滤功能
+        col1, col2, col3 = st.columns([2, 2, 1])
+        with col1:
+            search_query = st.text_input("🔍 搜索笔记内容")
+        with col2:
+            tag_filter = st.selectbox("🏷️ 按标签过滤", ["全部"] + list(set(tag for note in current_notes for tag in note.get('tags', []))))
+        with col3:
+            note_type_filter = st.selectbox("📝 按类型过滤", ["全部", "股票笔记", "随心记"])
+        
+        # 过滤笔记
+        filtered_notes = current_notes
+        if search_query:
+            filtered_notes = [n for n in filtered_notes if search_query.lower() in n['content'].lower()]
+        if tag_filter != "全部":
+            filtered_notes = [n for n in filtered_notes if tag_filter in n.get('tags', [])]
+        if note_type_filter != "全部":
+            filtered_notes = [n for n in filtered_notes if n.get('note_type', '股票笔记') == note_type_filter]
+        
+        # 显示笔记统计
+        stock_notes_count = len([n for n in filtered_notes if n.get('note_type', '股票笔记') == '股票笔记'])
+        free_notes_count = len([n for n in filtered_notes if n.get('note_type', '股票笔记') == '随心记'])
+        
+        st.info(f"📊 笔记统计: 股票笔记 {stock_notes_count} 条 | 随心记 {free_notes_count} 条 | 总计 {len(filtered_notes)} 条")
+        
+        # 显示笔记
+        for i, note in enumerate(filtered_notes):
+            # 根据笔记类型设置不同的图标和颜色
+            note_type = note.get('note_type', '股票笔记')
+            note_icon = "📈" if note_type == "股票笔记" else "📝"
+            note_color = "#e3f2fd" if note_type == "股票笔记" else "#f3e5f5"
+            
+            with st.expander(f"{note_icon} {note['create_time']} - {note['sentiment']} - {note_type}", expanded=i==0):
+                # 显示用户信息
+                if note.get('author'):
+                    user_role = note.get('user_role', 'user')
+                    role_emoji = "👑" if user_role == "admin" else "👤"
+                    st.write(f"{role_emoji} **作者:** {note['author']} ({user_role})")
+                
+                # 显示标签
+                if note.get('tags'):
+                    tag_html = " ".join([f"<span style='background-color: #e0e0e0; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; margin-right: 5px;'>{tag}</span>" for tag in note['tags']])
+                    st.markdown(f"🏷️ {tag_html}", unsafe_allow_html=True)
+                
+                # 显示内容
+                st.write(note['content'])
+                
+                # 操作按钮（仅管理员和笔记作者可以删除）
+                if st.session_state.get('user_authenticated', False):
+                    current_user = st.session_state.current_user
+                    user_role = st.session_state.user_role
+                    note_author = note.get('author')
+                    
+                    # 只有管理员或笔记作者可以删除
+                    if user_role == "admin" or note_author == current_user:
+                        col1, col2 = st.columns([1, 1])
+                        with col1:
+                            if st.button("🗑️ 删除", key=f"delete_{note['timestamp']}"):
+                                # 删除确认
+                                if st.session_state.get(f"confirm_delete_{note['timestamp']}", False):
+                                    notes_data[symbol].remove(note)
+                                    save_investment_notes(notes_data)
+                                    st.success("✅ 笔记已删除")
+                                    st.rerun()
+                                else:
+                                    st.session_state[f"confirm_delete_{note['timestamp']}"] = True
+                                    st.warning("⚠️ 确认删除？此操作不可撤销")
+                        with col2:
+                            if st.button("📊 分析", key=f"analyze_{note['timestamp']}"):
+                                # 可以添加笔记分析功能
+                                st.info("📈 笔记分析功能开发中...")
+    
+    # 数据管理（仅管理员）
+    if st.session_state.get('user_authenticated', False) and st.session_state.get('user_role') == "admin":
+        st.markdown("---")
+        st.subheader("⚙️ 数据管理（管理员）")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 导出笔记"):
+                # 导出功能
+                export_data = {
+                    "export_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "notes": current_notes
+                }
+                
+                st.download_button(
+                    label="📥 下载JSON文件",
+                    data=json.dumps(export_data, ensure_ascii=False, indent=2),
+                    file_name=f"investment_notes_{symbol}_{datetime.now().strftime('%Y%m%d')}.json",
+                    mime="application/json"
+                )
+        
+        with col2:
+            if st.button("🗑️ 清空所有笔记", type="secondary"):
+                if st.session_state.get("confirm_clear_all", False):
+                    notes_data[symbol] = []
+                    save_investment_notes(notes_data)
+                    st.success("✅ 所有笔记已清空")
+                    st.rerun()
+                else:
+                    st.session_state["confirm_clear_all"] = True
+                    st.error("⚠️ 确认清空所有笔记？此操作不可撤销！")
 
 def main():
     """主函数"""
     st.title("🚀 Python量化交易平台")
     st.markdown("---")
+    
+    # 检查是否显示管理员面板
+    if st.session_state.get('show_admin_panel', False):
+        display_admin_panel()
+        return
     
     # 初始化变量
     # 检查是否有从近期关注列表中选择的股票
@@ -421,7 +1478,7 @@ def main():
         st.subheader("功能模块")
         function_module = st.radio(
             "选择分析功能",
-            ["历史数据", "回测分析", "AI诊股", "基本信息", "逐笔交易", "近期关注"],
+            ["历史数据", "回测分析", "AI诊股", "基本信息", "逐笔交易", "近期关注", "投资笔记"],
             help="选择不同的分析功能模块"
         )
         
@@ -597,6 +1654,17 @@ def main():
             model_platform = "local"
             selected_model = "deepseek-r1:7b"
         
+        # 投资笔记模块参数
+        elif function_module == "投资笔记":
+            # 设置默认值
+            start_date = datetime.now() - timedelta(days=365)
+            end_date = datetime.now()
+            strategy_name = "移动平均策略"
+            strategy_params = {}
+            enable_model_analysis = False
+            model_platform = "local"
+            selected_model = "deepseek-r1:7b"
+        
         # 基本信息和逐笔交易不需要额外参数
         else:
             # 设置默认值
@@ -651,6 +1719,10 @@ def main():
             # 近期关注模块：选择时立即运行，无需按钮
             show_recent = True
             st.info("⭐ 正在显示近期关注...")
+        elif function_module == "投资笔记":
+            # 投资笔记模块：选择时立即运行，无需按钮
+            show_notes = True
+            st.info("📝 正在显示投资笔记...")
     
     # 主内容区域
     # 确保所有变量都已定义
@@ -666,8 +1738,24 @@ def main():
         show_basic_info = False
     if 'show_recent' not in locals():
         show_recent = False
+    if 'show_notes' not in locals():
+        show_notes = False
     
-    if run_history or run_backtest or run_model_only or show_intraday or show_basic_info or show_recent:
+    # 投资笔记模块显示
+    if show_notes:
+        # 检查是否需要登录
+        if st.session_state.get('need_login_for_notes', False):
+            # 显示登录界面
+            if setup_user_authentication():
+                # 登录成功，清除标记并显示笔记
+                st.session_state.need_login_for_notes = False
+                display_investment_notes(symbol, stock_name, data_provider)
+            else:
+                # 登录失败或取消，仍然显示笔记概览
+                display_investment_notes(symbol, stock_name, data_provider)
+        else:
+            display_investment_notes(symbol, stock_name, data_provider)
+    elif run_history or run_backtest or run_model_only or show_intraday or show_basic_info or show_recent:
         # 确保变量已定义
         if 'symbol' not in locals():
             symbol = "600519"  # 默认股票代码
