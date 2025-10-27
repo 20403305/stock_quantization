@@ -8,6 +8,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta, date
@@ -782,7 +783,7 @@ def main():
             
             # 近期关注模块
             if show_recent:
-                display_recent_stocks()
+                display_recent_stocks(data_provider)
                 return  # 近期关注显示完成后直接返回
     
     else:
@@ -2451,8 +2452,92 @@ def display_data_statistics(data):
             volume_stats = data['Volume'].describe()
             st.write(volume_stats)
 
-def display_recent_stocks():
-    """显示近期关注股票列表"""
+def analyze_stock_performance(symbol, stock_name, data_provider):
+    """分析股票从关注以来的表现"""
+    try:
+        # 获取该股票的关注记录
+        recent_stocks_data = load_recent_stocks()
+        if symbol not in recent_stocks_data:
+            return None
+        
+        # 获取最早的关注时间
+        earliest_record = min(recent_stocks_data[symbol], key=lambda x: x['timestamp'])
+        start_date = datetime.fromtimestamp(earliest_record['timestamp']).strftime('%Y-%m-%d')
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        
+        # 获取股票历史数据
+        data = load_stock_data(symbol, start_date, end_date, data_provider)
+        
+        if data.empty:
+            return None
+        
+        # 计算涨跌统计
+        data = data.copy()  # 创建副本以避免 SettingWithCopyWarning
+        data['daily_return'] = data['Close'].pct_change()
+        data['is_up'] = data['daily_return'] > 0
+        data['is_down'] = data['daily_return'] < 0
+        
+        up_days = data['is_up'].sum()
+        down_days = data['is_down'].sum()
+        flat_days = len(data) - up_days - down_days - 1  # 减去第一天的NaN
+        
+        # 计算总涨跌幅
+        start_price = data['Close'].iloc[0]
+        end_price = data['Close'].iloc[-1]
+        total_return = (end_price - start_price) / start_price
+        
+        # 计算最大回撤
+        rolling_max = data['Close'].expanding().max()
+        drawdown = (data['Close'] - rolling_max) / rolling_max
+        max_drawdown = drawdown.min()
+        
+        # 计算最大回撤修复天数
+        max_dd_date = drawdown.idxmin()
+        if max_dd_date is not None:
+            recovery_data = data.loc[max_dd_date:]
+            if not recovery_data.empty:
+                peak_after_dd = recovery_data['Close'].max()
+                recovery_days = None
+                for i, (date, row) in enumerate(recovery_data.iterrows()):
+                    if row['Close'] >= rolling_max.loc[max_dd_date]:
+                        recovery_days = i
+                        break
+            else:
+                recovery_days = None
+        else:
+            recovery_days = None
+        
+        # 计算波动率
+        volatility = data['daily_return'].std() * np.sqrt(252)  # 年化波动率
+        
+        return {
+            'symbol': symbol,
+            'stock_name': stock_name,
+            'start_date': start_date,
+            'end_date': end_date,
+            'total_days': len(data),
+            'up_days': up_days,
+            'down_days': down_days,
+            'flat_days': flat_days,
+            'up_ratio': up_days / (len(data) - 1) if len(data) > 1 else 0,
+            'down_ratio': down_days / (len(data) - 1) if len(data) > 1 else 0,
+            'total_return': total_return,
+            'max_drawdown': max_drawdown,
+            'recovery_days': recovery_days,
+            'volatility': volatility,
+            'start_price': start_price,
+            'end_price': end_price
+        }
+    except Exception as e:
+        print(f"分析股票 {symbol} 表现时出错: {e}")
+        return None
+
+def display_recent_stocks(data_provider="tushare"):
+    """显示近期关注股票列表
+    
+    Args:
+        data_provider: 数据源，默认为tushare
+    """
     st.header("⭐ 近期关注股票")
     
     # 获取近期关注股票排名
@@ -2472,6 +2557,163 @@ def display_recent_stocks():
     with col3:
         latest_stock = max(recent_stocks, key=lambda x: x['latest_timestamp'])
         st.metric("最近查询", latest_stock['stock_name'])
+    
+    st.markdown("---")
+    
+    # 股票对比分析功能
+    st.subheader("📊 股票对比分析")
+    
+    # 选择要分析的股票
+    selected_stocks = st.multiselect(
+        "选择要对比分析的股票（最多5只）",
+        [f"{stock['symbol']} - {stock['stock_name']}" for stock in recent_stocks],
+        max_selections=5,
+        help="选择多只股票进行对比分析"
+    )
+    
+    if selected_stocks:
+        # 使用侧边栏选择的数据源
+        st.info(f"📊 使用数据源: {'Tushare' if data_provider == 'tushare' else 'Yahoo Finance' if data_provider == 'yfinance' else 'AKShare'}")
+        
+        if st.button("🚀 运行对比分析", type="primary"):
+            with st.spinner("正在分析股票表现..."):
+                # 分析每只股票的表现
+                performance_results = []
+                
+                for stock_option in selected_stocks:
+                    symbol = stock_option.split(' - ')[0]
+                    stock_name = stock_option.split(' - ')[1]
+                    
+                    result = analyze_stock_performance(symbol, stock_name, data_provider)
+                    if result:
+                        performance_results.append(result)
+                
+                if performance_results:
+                    # 显示对比分析结果
+                    st.subheader("📈 股票表现对比")
+                    
+                    # 创建对比表格
+                    comparison_df = pd.DataFrame([{
+                        '股票代码': r['symbol'],
+                        '股票名称': r['stock_name'],
+                        '关注起始': r['start_date'],
+                        '分析天数': r['total_days'],
+                        '上涨天数': r['up_days'],
+                        '下跌天数': r['down_days'],
+                        '平盘天数': r['flat_days'],
+                        '上涨比例': f"{r['up_ratio']:.1%}",
+                        '下跌比例': f"{r['down_ratio']:.1%}",
+                        '总涨跌幅': f"{r['total_return']:.2%}",
+                        '最大回撤': f"{r['max_drawdown']:.2%}",
+                        '回撤修复天数': str(r['recovery_days']) if r['recovery_days'] is not None else '未修复',
+                        '年化波动率': f"{r['volatility']:.2%}"
+                    } for r in performance_results])
+                    
+                    # 确保数据类型兼容性
+                    comparison_df['分析天数'] = comparison_df['分析天数'].astype(int)
+                    comparison_df['上涨天数'] = comparison_df['上涨天数'].astype(int)
+                    comparison_df['下跌天数'] = comparison_df['下跌天数'].astype(int)
+                    comparison_df['平盘天数'] = comparison_df['平盘天数'].astype(int)
+                    
+                    st.dataframe(comparison_df, width='stretch', hide_index=True)
+                    
+                    # 显示可视化图表
+                    st.subheader("📊 可视化对比")
+                    
+                    # 涨跌幅对比图
+                    fig_returns = go.Figure()
+                    for r in performance_results:
+                        fig_returns.add_trace(go.Bar(
+                            x=[r['stock_name']],
+                            y=[r['total_return'] * 100],
+                            name=r['stock_name'],
+                            text=f"{r['total_return']:.2%}",
+                            textposition='auto'
+                        ))
+                    
+                    fig_returns.update_layout(
+                        title="总涨跌幅对比",
+                        xaxis_title="股票名称",
+                        yaxis_title="涨跌幅(%)",
+                        height=400
+                    )
+                    st.plotly_chart(fig_returns, width='stretch', key="returns_comparison_chart")
+                    
+                    # 涨跌天数对比图
+                    fig_days = go.Figure()
+                    for r in performance_results:
+                        fig_days.add_trace(go.Bar(
+                            x=['上涨', '下跌', '平盘'],
+                            y=[r['up_days'], r['down_days'], r['flat_days']],
+                            name=r['stock_name'],
+                            text=[r['up_days'], r['down_days'], r['flat_days']],
+                            textposition='auto'
+                        ))
+                    
+                    fig_days.update_layout(
+                        title="涨跌天数对比",
+                        xaxis_title="涨跌类型",
+                        yaxis_title="天数",
+                        barmode='group',
+                        height=400
+                    )
+                    st.plotly_chart(fig_days, width='stretch', key="days_comparison_chart")
+                    
+                    # 风险指标对比
+                    fig_risk = go.Figure()
+                    
+                    # 最大回撤对比
+                    fig_risk.add_trace(go.Bar(
+                        x=[r['stock_name'] for r in performance_results],
+                        y=[abs(r['max_drawdown']) * 100 for r in performance_results],
+                        name='最大回撤',
+                        text=[f"{r['max_drawdown']:.2%}" for r in performance_results],
+                        textposition='auto',
+                        marker_color='red'
+                    ))
+                    
+                    fig_risk.update_layout(
+                        title="风险指标对比 - 最大回撤",
+                        xaxis_title="股票名称",
+                        yaxis_title="最大回撤(%)",
+                        height=400
+                    )
+                    st.plotly_chart(fig_risk, width='stretch', key="risk_comparison_chart")
+                    
+                    # 详细分析报告
+                    st.subheader("📋 详细分析报告")
+                    
+                    for r in performance_results:
+                        with st.expander(f"📊 {r['stock_name']} ({r['symbol']}) 详细分析"):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.metric("总涨跌幅", f"{r['total_return']:.2%}")
+                                st.metric("上涨天数", r['up_days'])
+                                st.metric("下跌天数", r['down_days'])
+                                st.metric("平盘天数", r['flat_days'])
+                            
+                            with col2:
+                                st.metric("最大回撤", f"{r['max_drawdown']:.2%}")
+                                st.metric("回撤修复天数", 
+                                         r['recovery_days'] if r['recovery_days'] is not None else "未修复")
+                                st.metric("年化波动率", f"{r['volatility']:.2%}")
+                                st.metric("分析周期", f"{r['start_date']} 至 {r['end_date']}")
+                            
+                            # 涨跌分布饼图
+                            fig_pie = go.Figure(data=[go.Pie(
+                                labels=['上涨', '下跌', '平盘'],
+                                values=[r['up_days'], r['down_days'], r['flat_days']],
+                                hole=.3
+                            )])
+                            
+                            fig_pie.update_layout(
+                                title="涨跌天数分布",
+                                height=300
+                            )
+                            st.plotly_chart(fig_pie, width='stretch', key=f"pie_chart_{r['symbol']}")
+                else:
+                    st.warning("⚠️ 无法获取所选股票的对比分析数据")
     
     st.markdown("---")
     
