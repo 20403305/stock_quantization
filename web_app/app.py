@@ -1048,9 +1048,13 @@ def display_all_notes_overview():
     
     # 根据登录状态和公开状态过滤笔记（在搜索前先过滤）
     if st.session_state.get('user_authenticated', False):
-        # 已登录用户：显示公开笔记和自己所有的笔记
-        current_user = st.session_state.current_user
-        filtered_notes = [n for n in all_notes if n.get('is_public', True) or n.get('author') == current_user]
+        if st.session_state.get('user_role') == "admin":
+            # 管理员：可以看到所有笔记（包括普通用户的非公开笔记）
+            filtered_notes = all_notes
+        else:
+            # 普通用户：显示公开笔记和自己所有的笔记
+            current_user = st.session_state.current_user
+            filtered_notes = [n for n in all_notes if n.get('is_public', True) or n.get('author') == current_user]
     else:
         # 未登录用户：只显示公开笔记
         filtered_notes = [n for n in all_notes if n.get('is_public', True)]
@@ -1203,9 +1207,13 @@ def display_investment_notes(symbol, stock_name, data_provider):
     with col1:
         # 显示实际可见的笔记数量（考虑权限过滤）
         if st.session_state.get('user_authenticated', False):
-            # 已登录用户：显示公开笔记和自己所有的笔记
-            current_user = st.session_state.current_user
-            visible_notes = [n for n in current_notes if n.get('is_public', True) or n.get('author') == current_user]
+            if st.session_state.get('user_role') == "admin":
+                # 管理员：可以看到所有笔记（包括普通用户的非公开笔记）
+                visible_notes = current_notes
+            else:
+                # 普通用户：显示公开笔记和自己所有的笔记
+                current_user = st.session_state.current_user
+                visible_notes = [n for n in current_notes if n.get('is_public', True) or n.get('author') == current_user]
         else:
             # 未登录用户：只显示公开笔记
             visible_notes = [n for n in current_notes if n.get('is_public', True)]
@@ -1337,9 +1345,13 @@ def display_investment_notes(symbol, stock_name, data_provider):
         
         # 根据登录状态和公开状态过滤笔记（在搜索前先过滤）
         if st.session_state.get('user_authenticated', False):
-            # 已登录用户：显示公开笔记和自己所有的笔记
-            current_user = st.session_state.current_user
-            filtered_notes = [n for n in current_notes if n.get('is_public', True) or n.get('author') == current_user]
+            if st.session_state.get('user_role') == "admin":
+                # 管理员：可以看到所有笔记（包括普通用户的非公开笔记）
+                filtered_notes = current_notes
+            else:
+                # 普通用户：显示公开笔记和自己所有的笔记
+                current_user = st.session_state.current_user
+                filtered_notes = [n for n in current_notes if n.get('is_public', True) or n.get('author') == current_user]
         else:
             # 未登录用户：只显示公开笔记
             filtered_notes = [n for n in current_notes if n.get('is_public', True)]
