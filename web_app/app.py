@@ -1201,7 +1201,15 @@ def display_investment_notes(symbol, stock_name, data_provider):
     # 显示统计信息
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("笔记数量", len(current_notes))
+        # 显示实际可见的笔记数量（考虑权限过滤）
+        if st.session_state.get('user_authenticated', False):
+            # 已登录用户：显示公开笔记和自己所有的笔记
+            current_user = st.session_state.current_user
+            visible_notes = [n for n in current_notes if n.get('is_public', True) or n.get('author') == current_user]
+        else:
+            # 未登录用户：只显示公开笔记
+            visible_notes = [n for n in current_notes if n.get('is_public', True)]
+        st.metric("笔记数量", f"{len(visible_notes)}/{len(current_notes)}")
     with col2:
         st.metric("最大长度", f"{config['max_note_length']}字符")
     with col3:
