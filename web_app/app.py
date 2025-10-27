@@ -2620,6 +2620,104 @@ def display_recent_stocks(data_provider="tushare"):
                     # 显示可视化图表
                     st.subheader("📊 可视化对比")
                     
+                    # 每日涨跌走势图
+                    st.subheader("📈 每日涨跌走势")
+                    
+                    # 创建选项卡显示不同股票的每日走势
+                    stock_tabs = st.tabs([f"{r['stock_name']} ({r['symbol']})" for r in performance_results])
+                    
+                    for i, (r, tab) in enumerate(zip(performance_results, stock_tabs)):
+                        with tab:
+                            # 获取该股票的详细历史数据
+                            try:
+                                # 获取该股票的关注记录
+                                recent_stocks_data = load_recent_stocks()
+                                if r['symbol'] in recent_stocks_data:
+                                    # 获取最早的关注时间
+                                    earliest_record = min(recent_stocks_data[r['symbol']], key=lambda x: x['timestamp'])
+                                    start_date = datetime.fromtimestamp(earliest_record['timestamp']).strftime('%Y-%m-%d')
+                                    end_date = datetime.now().strftime('%Y-%m-%d')
+                                    
+                                    # 获取股票历史数据
+                                    stock_data = load_stock_data(r['symbol'], start_date, end_date, data_provider)
+                                    
+                                    if not stock_data.empty:
+                                        # 计算每日涨跌幅
+                                        stock_data = stock_data.copy()
+                                        stock_data['daily_return'] = stock_data['Close'].pct_change() * 100
+                                        stock_data['daily_return_pct'] = stock_data['daily_return'].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "-")
+                                        stock_data['is_up'] = stock_data['daily_return'] > 0
+                                        
+                                        # 创建每日涨跌图
+                                        fig_daily = go.Figure()
+                                        
+                                        # 添加涨跌柱状图
+                                        fig_daily.add_trace(go.Bar(
+                                            x=stock_data.index,
+                                            y=stock_data['daily_return'],
+                                            name='日涨跌幅',
+                                            text=stock_data['daily_return_pct'],
+                                            textposition='auto',
+                                            marker_color=np.where(stock_data['is_up'], 'red', 'green'),
+                                            hovertemplate='<b>日期</b>: %{x}<br><b>涨跌幅</b>: %{text}<extra></extra>'
+                                        ))
+                                        
+                                        # 添加零线
+                                        fig_daily.add_hline(y=0, line_dash="dash", line_color="gray")
+                                        
+                                        fig_daily.update_layout(
+                                            title=f"{r['stock_name']} ({r['symbol']}) - 每日涨跌走势",
+                                            xaxis_title="日期",
+                                            yaxis_title="涨跌幅(%)",
+                                            height=500,
+                                            showlegend=False
+                                        )
+                                        
+                                        # 添加移动平均线（5日）
+                                        if len(stock_data) > 5:
+                                            stock_data['ma_5'] = stock_data['daily_return'].rolling(window=5).mean()
+                                            fig_daily.add_trace(go.Scatter(
+                                                x=stock_data.index,
+                                                y=stock_data['ma_5'],
+                                                name='5日移动平均',
+                                                line=dict(color='blue', width=2),
+                                                hovertemplate='<b>日期</b>: %{x}<br><b>5日均值</b>: %{y:.2f}%<extra></extra>'
+                                            ))
+                                        
+                                        st.plotly_chart(fig_daily, width='stretch', key=f"daily_chart_{r['symbol']}")
+                                        
+                                        # 显示统计信息
+                                        col1, col2, col3, col4 = st.columns(4)
+                                        with col1:
+                                            st.metric("总交易日", len(stock_data))
+                                        with col2:
+                                            up_days = stock_data['is_up'].sum()
+                                            st.metric("上涨天数", up_days)
+                                        with col3:
+                                            down_days = (stock_data['daily_return'] < 0).sum()
+                                            st.metric("下跌天数", down_days)
+                                        with col4:
+                                            avg_return = stock_data['daily_return'].mean()
+                                            st.metric("平均日涨跌", f"{avg_return:.2f}%")
+                                        
+                                        # 显示最近10个交易日的涨跌情况
+                                        st.subheader("📅 最近10个交易日涨跌情况")
+                                        recent_data = stock_data.tail(10).copy()
+                                        recent_data = recent_data[['Close', 'daily_return']]
+                                        recent_data['涨跌幅'] = recent_data['daily_return'].apply(lambda x: f"{x:.2f}%")
+                                        recent_data['涨跌'] = recent_data['daily_return'].apply(lambda x: '📈上涨' if x > 0 else '📉下跌' if x < 0 else '➡️平盘')
+                                        recent_data.index = recent_data.index.strftime('%Y-%m-%d')
+                                        recent_data = recent_data[['Close', '涨跌幅', '涨跌']]
+                                        recent_data.columns = ['收盘价', '涨跌幅', '涨跌情况']
+                                        
+                                        st.dataframe(recent_data, width='stretch')
+                                    else:
+                                        st.warning("⚠️ 无法获取该股票的详细历史数据")
+                                else:
+                                    st.warning("⚠️ 该股票不在近期关注列表中")
+                            except Exception as e:
+                                st.error(f"❌ 获取股票数据时出错: {e}")
+                    
                     # 涨跌幅对比图
                     fig_returns = go.Figure()
                     for r in performance_results:
