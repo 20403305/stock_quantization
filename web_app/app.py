@@ -1046,8 +1046,16 @@ def display_all_notes_overview():
     with col5:
         author_filter = st.selectbox("按作者过滤", ["全部"] + list(set(note.get('author', '匿名用户') for note in all_notes)))
     
-    # 过滤笔记
-    filtered_notes = all_notes
+    # 根据登录状态和公开状态过滤笔记（在搜索前先过滤）
+    if st.session_state.get('user_authenticated', False):
+        # 已登录用户：显示公开笔记和自己所有的笔记
+        current_user = st.session_state.current_user
+        filtered_notes = [n for n in all_notes if n.get('is_public', True) or n.get('author') == current_user]
+    else:
+        # 未登录用户：只显示公开笔记
+        filtered_notes = [n for n in all_notes if n.get('is_public', True)]
+    
+    # 搜索和过滤（在权限过滤后进行）
     if search_query:
         filtered_notes = [n for n in filtered_notes if search_query.lower() in n['content'].lower()]
     if tag_filter != "全部":
@@ -1073,6 +1081,10 @@ def display_all_notes_overview():
         author = note.get('author', '匿名用户')
         user_role = note.get('user_role', 'user')
         
+        # 添加公开状态
+        is_public = note.get('is_public', True)
+        public_status = "公开" if is_public else "私密"
+        
         table_data.append({
             "股票代码": note['symbol'],
             "股票名称": note.get('stock_name', '未知'),
@@ -1080,6 +1092,7 @@ def display_all_notes_overview():
             "作者": f"{author} ({user_role})",
             "创建时间": note['create_time'],
             "情绪": note['sentiment'],
+            "公开状态": public_status,
             "标签": ", ".join(note.get('tags', [])),
             "内容预览": note['content'][:100] + "..." if len(note['content']) > 100 else note['content']
         })
@@ -1095,7 +1108,12 @@ def display_all_notes_overview():
             note_type = note.get('note_type', '股票笔记')
             note_icon = "📈" if note_type == "股票笔记" else "📝"
             
-            with st.expander(f"{note_icon} {note['create_time']} - {note['symbol']} - {note['sentiment']} - {note_type}", expanded=i==0):
+            # 添加公开状态标识
+            is_public = note.get('is_public', True)
+            public_icon = "🌐" if is_public else "🔒"
+            public_text = "公开" if is_public else "私密"
+            
+            with st.expander(f"{note_icon} {note['create_time']} - {note['symbol']} - {note['sentiment']} - {note_type} - {public_icon}{public_text}", expanded=i==0):
                 # 显示基本信息
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
@@ -1112,6 +1130,9 @@ def display_all_notes_overview():
                     user_role = note.get('user_role', 'user')
                     role_emoji = "👑" if user_role == "admin" else "👤"
                     st.write(f"{role_emoji} **作者:** {note['author']} ({user_role})")
+                
+                # 显示公开状态
+                st.write(f"{public_icon} **公开状态:** {public_text}")
                 
                 # 显示标签
                 if note.get('tags'):
@@ -1132,12 +1153,20 @@ def display_investment_notes(symbol, stock_name, data_provider):
         # 管理员功能选择
         admin_option = st.radio(
             "👑 管理员功能",
-            ["投资笔记管理", "用户申请审核"],
-            help="选择管理员功能：管理投资笔记或审核用户申请"
+            ["投资笔记管理", "数据笔记管理", "用户申请审核"],
+            help="选择管理员功能：管理投资笔记、数据笔记管理或审核用户申请"
         )
         
         if admin_option == "用户申请审核":
             display_admin_panel()
+            return
+        elif admin_option == "数据笔记管理":
+            # 加载配置和数据
+            config = load_notes_config()
+            notes_data = load_investment_notes()
+            # 自动清理
+            notes_data = auto_cleanup_notes(notes_data, config)
+            display_data_notes_management(symbol, stock_name, notes_data)
             return
         # 如果选择投资笔记管理，继续显示投资笔记功能
     
@@ -1234,6 +1263,13 @@ def display_investment_notes(symbol, stock_name, data_provider):
             help="记录当前的投资情绪"
         )
         
+        # 公开发布选项
+        is_public = st.checkbox(
+            "🌐 公开发布",
+            value=True,
+            help="勾选后笔记将对所有用户可见，取消勾选则仅自己可见"
+        )
+        
         if st.button("💾 保存笔记", disabled=not can_write or not note_content.strip()):
             # 验证内容
             is_valid, valid_msg = validate_note_content(note_content, config)
@@ -1252,7 +1288,8 @@ def display_investment_notes(symbol, stock_name, data_provider):
                 "create_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "author": st.session_state.current_user,
                 "user_role": st.session_state.user_role,
-                "note_type": "股票笔记" if note_type == "📈 股票笔记" else "随心记"
+                "note_type": "股票笔记" if note_type == "📈 股票笔记" else "随心记",
+                "is_public": is_public
             }
             
             # 添加到数据
@@ -1290,8 +1327,16 @@ def display_investment_notes(symbol, stock_name, data_provider):
         with col3:
             note_type_filter = st.selectbox("📝 按类型过滤", ["全部", "股票笔记", "随心记"])
         
-        # 过滤笔记
-        filtered_notes = current_notes
+        # 根据登录状态和公开状态过滤笔记（在搜索前先过滤）
+        if st.session_state.get('user_authenticated', False):
+            # 已登录用户：显示公开笔记和自己所有的笔记
+            current_user = st.session_state.current_user
+            filtered_notes = [n for n in current_notes if n.get('is_public', True) or n.get('author') == current_user]
+        else:
+            # 未登录用户：只显示公开笔记
+            filtered_notes = [n for n in current_notes if n.get('is_public', True)]
+        
+        # 搜索和过滤（在权限过滤后进行）
         if search_query:
             filtered_notes = [n for n in filtered_notes if search_query.lower() in n['content'].lower()]
         if tag_filter != "全部":
@@ -1312,12 +1357,20 @@ def display_investment_notes(symbol, stock_name, data_provider):
             note_icon = "📈" if note_type == "股票笔记" else "📝"
             note_color = "#e3f2fd" if note_type == "股票笔记" else "#f3e5f5"
             
-            with st.expander(f"{note_icon} {note['create_time']} - {note['sentiment']} - {note_type}", expanded=i==0):
+            # 添加公开状态标识
+            is_public = note.get('is_public', True)
+            public_icon = "🌐" if is_public else "🔒"
+            public_text = "公开" if is_public else "私密"
+            
+            with st.expander(f"{note_icon} {note['create_time']} - {note['sentiment']} - {note_type} - {public_icon}{public_text}", expanded=i==0):
                 # 显示用户信息
                 if note.get('author'):
                     user_role = note.get('user_role', 'user')
                     role_emoji = "👑" if user_role == "admin" else "👤"
                     st.write(f"{role_emoji} **作者:** {note['author']} ({user_role})")
+                
+                # 显示公开状态
+                st.write(f"{public_icon} **公开状态:** {public_text}")
                 
                 # 显示标签
                 if note.get('tags'):
@@ -1327,14 +1380,14 @@ def display_investment_notes(symbol, stock_name, data_provider):
                 # 显示内容
                 st.write(note['content'])
                 
-                # 操作按钮（仅管理员和笔记作者可以删除）
+                # 操作按钮（仅管理员可以删除，普通用户不能删除自己的笔记）
                 if st.session_state.get('user_authenticated', False):
                     current_user = st.session_state.current_user
                     user_role = st.session_state.user_role
                     note_author = note.get('author')
                     
-                    # 只有管理员或笔记作者可以删除
-                    if user_role == "admin" or note_author == current_user:
+                    # 只有管理员可以删除笔记，普通用户不能删除
+                    if user_role == "admin":
                         col1, col2 = st.columns([1, 1])
                         with col1:
                             if st.button("🗑️ 删除", key=f"delete_{note['timestamp']}"):
@@ -1351,38 +1404,132 @@ def display_investment_notes(symbol, stock_name, data_provider):
                             if st.button("📊 分析", key=f"analyze_{note['timestamp']}"):
                                 # 可以添加笔记分析功能
                                 st.info("📈 笔记分析功能开发中...")
+                    # 普通用户只能查看，不能删除
+                    elif note_author == current_user:
+                        st.info("👤 这是您发布的笔记（仅查看，不可删除）")
+
+def display_data_notes_management(symbol, stock_name, notes_data):
+    """显示数据笔记管理界面（管理员专用）"""
+    st.header(f"📊 数据笔记管理 - {stock_name}({symbol})")
     
-    # 数据管理（仅管理员）
-    if st.session_state.get('user_authenticated', False) and st.session_state.get('user_role') == "admin":
-        st.markdown("---")
-        st.subheader("⚙️ 数据管理（管理员）")
+    # 加载配置
+    config = load_notes_config()
+    
+    # 获取当前股票的笔记
+    current_notes = notes_data.get(symbol, [])
+    
+    # 显示统计信息
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("当前股票笔记数量", len(current_notes))
+    with col2:
+        total_notes = sum(len(notes) for notes in notes_data.values())
+        st.metric("总笔记数量", total_notes)
+    with col3:
+        total_users = len(set(note.get('author') for notes in notes_data.values() for note in notes if note.get('author')))
+        st.metric("总用户数量", total_users)
+    
+    st.markdown("---")
+    
+    # 导出功能
+    st.subheader("📤 数据导出")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 导出当前股票笔记"):
+            export_data = {
+                "export_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "stock_symbol": symbol,
+                "stock_name": stock_name,
+                "notes": current_notes
+            }
+            
+            st.download_button(
+                label="📥 下载JSON文件",
+                data=json.dumps(export_data, ensure_ascii=False, indent=2),
+                file_name=f"investment_notes_{symbol}_{datetime.now().strftime('%Y%m%d')}.json",
+                mime="application/json"
+            )
+    
+    with col2:
+        if st.button("🔄 导出所有笔记"):
+            all_notes = []
+            for sym, notes in notes_data.items():
+                for note in notes:
+                    note['symbol'] = sym
+                    all_notes.append(note)
+            
+            export_data = {
+                "export_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "total_notes": len(all_notes),
+                "notes": all_notes
+            }
+            
+            st.download_button(
+                label="📥 下载完整JSON",
+                data=json.dumps(export_data, ensure_ascii=False, indent=2),
+                file_name=f"all_investment_notes_{datetime.now().strftime('%Y%m%d')}.json",
+                mime="application/json"
+            )
+    
+    st.markdown("---")
+    
+    # 查看和删除指定用户的笔记
+    st.subheader("👥 用户笔记管理")
+    
+    # 获取所有用户列表
+    all_users = set()
+    for symbol_notes in notes_data.values():
+        for note in symbol_notes:
+            if note.get('author'):
+                all_users.add(note['author'])
+    
+    if all_users:
+        selected_user = st.selectbox("选择用户", ["所有用户"] + sorted(list(all_users)))
         
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔄 导出笔记"):
-                # 导出功能
-                export_data = {
-                    "export_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "notes": current_notes
-                }
+        if selected_user != "所有用户":
+            # 显示指定用户的笔记
+            user_notes = []
+            for sym, symbol_notes in notes_data.items():
+                for note in symbol_notes:
+                    if note.get('author') == selected_user:
+                        note['symbol'] = sym
+                        user_notes.append(note)
+            
+            if user_notes:
+                st.info(f"📊 {selected_user} 的笔记数量: {len(user_notes)} 条")
                 
-                st.download_button(
-                    label="📥 下载JSON文件",
-                    data=json.dumps(export_data, ensure_ascii=False, indent=2),
-                    file_name=f"investment_notes_{symbol}_{datetime.now().strftime('%Y%m%d')}.json",
-                    mime="application/json"
-                )
-        
-        with col2:
-            if st.button("🗑️ 清空所有笔记", type="secondary"):
-                if st.session_state.get("confirm_clear_all", False):
-                    notes_data[symbol] = []
-                    save_investment_notes(notes_data)
-                    st.success("✅ 所有笔记已清空")
-                    st.rerun()
-                else:
-                    st.session_state["confirm_clear_all"] = True
-                    st.error("⚠️ 确认清空所有笔记？此操作不可撤销！")
+                # 按时间倒序排列
+                user_notes.sort(key=lambda x: x['timestamp'], reverse=True)
+                
+                for i, note in enumerate(user_notes):
+                    note_type = note.get('note_type', '股票笔记')
+                    note_icon = "📈" if note_type == "股票笔记" else "📝"
+                    is_public = note.get('is_public', True)
+                    public_icon = "🌐" if is_public else "🔒"
+                    
+                    with st.expander(f"{note_icon} {note['create_time']} - {note['symbol']} - {public_icon}", expanded=i==0):
+                        st.write(f"**内容:** {note['content']}")
+                        st.write(f"**情绪:** {note['sentiment']}")
+                        st.write(f"**标签:** {', '.join(note.get('tags', []))}")
+                        st.write(f"**公开状态:** {'公开' if is_public else '私密'}")
+                        
+                        # 删除按钮
+                        if st.button("🗑️ 删除此笔记", key=f"admin_delete_{note['timestamp']}_{note['symbol']}"):
+                            if st.session_state.get(f"admin_confirm_delete_{note['timestamp']}_{note['symbol']}", False):
+                                # 从正确的股票中删除笔记
+                                if note['symbol'] in notes_data:
+                                    notes_data[note['symbol']] = [n for n in notes_data[note['symbol']] if n['timestamp'] != note['timestamp']]
+                                    save_investment_notes(notes_data)
+                                    st.success(f"✅ 已删除 {selected_user} 在 {note['symbol']} 的笔记")
+                                    st.rerun()
+                            else:
+                                st.session_state[f"admin_confirm_delete_{note['timestamp']}_{note['symbol']}"] = True
+                                st.warning("⚠️ 确认删除此笔记？此操作不可撤销")
+            else:
+                st.info(f"📝 {selected_user} 暂无笔记记录")
+    else:
+        st.info("📝 暂无用户笔记记录")
 
 def main():
     """主函数"""
