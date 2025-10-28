@@ -1,0 +1,33 @@
+# AI诊股历史记录配置
+# 优化存储策略，防止数据量过大
+
+# 存储限制配置
+storage_limits:
+  max_records_per_stock: 20      # 每个股票最大记录数
+  max_total_records: 1000        # 总最大记录数
+  keep_days: 90                   # 保留天数（超过此天数的记录将被自动清理）
+  enable_compression: true        # 是否启用文件压缩
+
+# 清理策略
+cleanup_strategy:
+  auto_cleanup: true              # 是否自动清理过期记录
+  cleanup_interval_hours: 24      # 清理间隔（小时）
+  batch_size: 50                  # 批量处理记录数
+
+# 存储格式优化
+storage_optimization:
+  separate_files: true            # 是否为每个股票创建单独文件
+  compress_files: true           # 是否压缩文件
+  backup_old_format: true        # 是否备份旧格式文件
+
+# 性能优化
+performance:
+  lazy_loading: true             # 是否启用懒加载
+  cache_size: 100               # 内存缓存大小
+  batch_operations: true        # 是否启用批量操作
+
+# 监控和统计
+monitoring:
+  enable_statistics: true       # 是否启用统计功能
+  log_operations: true          # 是否记录操作日志
+  export_interval_days: 7      # 导出间隔天数

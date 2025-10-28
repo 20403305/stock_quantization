@@ -38,151 +38,95 @@ import time
 import re
 
 # AI诊股历史记录功能相关函数
+from src.diagnosis_history_manager import get_history_manager
+
+# 获取历史记录管理器实例
+history_manager = get_history_manager()
+
 def load_ai_diagnosis_history():
     """加载AI诊股历史记录"""
     try:
-        # 存储到data目录下的ai_diagnosis子目录
-        data_dir = Path(__file__).parent.parent / 'data' / 'ai_diagnosis'
-        data_dir.mkdir(exist_ok=True, parents=True)
-        file_path = data_dir / 'diagnosis_history.json'
+        all_stocks = history_manager.get_all_stocks()
+        history_data = {}
         
-        if file_path.exists():
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        else:
-            return {}
-    except (FileNotFoundError, json.JSONDecodeError):
+        for symbol in all_stocks:
+            records = history_manager.get_stock_history(symbol)
+            history_data[symbol] = records
+        
+        return history_data
+    except Exception as e:
+        print(f"加载AI诊股历史记录失败: {e}")
         return {}
 
 def save_ai_diagnosis_history(history_data):
-    """保存AI诊股历史记录"""
-    try:
-        data_dir = Path(__file__).parent.parent / 'data' / 'ai_diagnosis'
-        data_dir.mkdir(exist_ok=True, parents=True)
-        file_path = data_dir / 'diagnosis_history.json'
-        
-        # 优化存储格式
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(history_data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"保存AI诊股历史记录失败: {e}")
+    """保存AI诊股历史记录（兼容性函数，实际使用新的管理器）"""
+    # 新的管理器会自动处理保存，此函数主要用于兼容性
+    pass
 
 def add_ai_diagnosis_record(symbol, stock_name, model_results, model_platform, model_name, data_provider):
     """添加AI诊股记录到历史"""
-    history_data = load_ai_diagnosis_history()
-    
-    if symbol not in history_data:
-        history_data[symbol] = []
-    
-    # 获取当前日期（用于去重判断）
-    current_date = datetime.now().strftime("%Y-%m-%d")
-    
-    # 检查是否已有相同分析周期、模型平台和模型的记录
-    existing_records = history_data[symbol]
-    
-    # 查找当天相同配置的记录
-    duplicate_records = []
-    for i, record in enumerate(existing_records):
-        record_date = datetime.fromtimestamp(record['timestamp']).strftime("%Y-%m-%d")
-        if (record_date == current_date and 
-            record['model_platform'] == model_platform and 
-            record['model_name'] == model_name and 
-            record['analysis_summary']['data_period_days'] == model_results['data_period']['days']):
-            duplicate_records.append(i)
-    
-    # 删除当天相同配置的旧记录，只保留最新的一条
-    if duplicate_records:
-        # 保留最新的记录（时间戳最大的）
-        latest_timestamp = max([existing_records[i]['timestamp'] for i in duplicate_records])
-        
-        # 删除所有相同配置的记录
-        history_data[symbol] = [record for i, record in enumerate(existing_records) 
-                               if i not in duplicate_records or record['timestamp'] == latest_timestamp]
-    
-    # 判断分析是否成功
-    is_success = model_results['model_analysis']['success']
-    
-    # 创建新的诊股记录（保存完整分析报告）
-    new_record = {
-        "timestamp": datetime.now().timestamp(),
-        "query_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "symbol": symbol,
-        "stock_name": stock_name,
-        "model_platform": model_platform,
-        "model_name": model_name,
-        "data_provider": data_provider,
-        "analysis_summary": {
-            "success": is_success,
-            "full_analysis": model_results['model_analysis']['analysis'] if is_success else "分析失败",
-            "error_message": model_results['model_analysis'].get('error', '未知错误') if not is_success else None,
-            "is_demo": model_results['model_analysis'].get('is_demo', False),
-            "technical_indicators": {
-                "current_price": model_results['technical_indicators']['price']['current'] if model_results['technical_indicators'] else 0,
-                "rsi": model_results['technical_indicators']['momentum']['rsi'] if model_results['technical_indicators'] else 0,
-                "volume_ratio": model_results['technical_indicators']['volume']['ratio'] if model_results['technical_indicators'] else 0,
-                "support_level": model_results['technical_indicators']['price']['support'] if model_results['technical_indicators'] else 0,
-                "resistance_level": model_results['technical_indicators']['price']['resistance'] if model_results['technical_indicators'] else 0
-            },
-            "data_period_days": model_results['data_period']['days']
-        },
-        "full_analysis_available": is_success  # 标记完整分析数据是否可用
-    }
-    
-    # 限制每个股票最多保存10条记录
-    if len(history_data[symbol]) >= 10:
-        history_data[symbol] = history_data[symbol][-9:]  # 保留最新的9条
-    
-    history_data[symbol].append(new_record)
-    
-    # 按时间排序，最新的在前面
-    history_data[symbol].sort(key=lambda x: x['timestamp'], reverse=True)
-    
-    save_ai_diagnosis_history(history_data)
+    try:
+        history_manager.add_record(
+            symbol=symbol,
+            stock_name=stock_name,
+            model_results=model_results,
+            model_platform=model_platform,
+            model_name=model_name,
+            data_provider=data_provider
+        )
+    except Exception as e:
+        print(f"添加AI诊股记录失败: {e}")
 
 def get_ai_diagnosis_statistics():
     """获取AI诊股统计信息"""
-    history_data = load_ai_diagnosis_history()
-    
-    if not history_data:
+    try:
+        stats = history_manager.get_statistics()
+        history_data = load_ai_diagnosis_history()
+        
+        total_analyses = stats.get("total_records", 0)
+        unique_stocks = len(history_data)
+        
+        # 计算成功率
+        success_count = 0
+        for symbol, records in history_data.items():
+            for record in records:
+                if record.get("analysis_summary", {}).get("success", False):
+                    success_count += 1
+        
+        # 修复成功率计算：确保不会出现异常值
+        if total_analyses > 0:
+            success_rate = (success_count / total_analyses * 100)
+            # 限制成功率在合理范围内（0-100%）
+            success_rate = max(0, min(100, success_rate))
+        else:
+            success_rate = 0
+        
+        # 计算最近活动（24小时内的分析次数）
+        recent_activity_count = 0
+        current_time = datetime.now().timestamp()
+        one_day_ago = current_time - (24 * 3600)
+        
+        for symbol, records in history_data.items():
+            for record in records:
+                if record.get("timestamp", 0) >= one_day_ago:
+                    recent_activity_count += 1
+        
+        return {
+            "total_analyses": total_analyses,
+            "unique_stocks": unique_stocks,
+            "success_rate": round(success_rate, 2),
+            "platform_usage": {},
+            "recent_activity": recent_activity_count
+        }
+    except Exception as e:
+        print(f"获取AI诊股统计信息失败: {e}")
         return {
             "total_analyses": 0,
             "unique_stocks": 0,
             "success_rate": 0,
             "platform_usage": {},
-            "recent_activity": []
+            "recent_activity": 0
         }
-    
-    total_analyses = 0
-    success_count = 0
-    platform_usage = defaultdict(int)
-    recent_activity = []
-    
-    for symbol, records in history_data.items():
-        total_analyses += len(records)
-        for record in records:
-            if record['analysis_summary']['success']:
-                success_count += 1
-            platform_usage[record['model_platform']] += 1
-            
-            # 收集最近的活动
-            recent_activity.append({
-                "symbol": symbol,
-                "stock_name": record['stock_name'],
-                "query_time": record['query_time'],
-                "platform": record['model_platform']
-            })
-    
-    # 按时间排序最近的10个活动
-    recent_activity.sort(key=lambda x: x['query_time'], reverse=True)
-    recent_activity = recent_activity[:10]
-    
-    return {
-        "total_analyses": total_analyses,
-        "unique_stocks": len(history_data),
-        "success_rate": success_count / total_analyses if total_analyses > 0 else 0,
-        "platform_usage": dict(platform_usage),
-        "recent_activity": recent_activity
-    }
 
 def _get_analysis_preview(record):
     """获取分析预览内容"""
@@ -220,10 +164,10 @@ def display_ai_diagnosis_history():
         st.metric("分析股票数", stats["unique_stocks"])
     
     with col3:
-        st.metric("成功率", f"{stats['success_rate']:.1%}")
+        st.metric("成功率", f"{stats['success_rate']:.1f}%")
     
     with col4:
-        st.metric("最近活动", f"{len(stats['recent_activity'])}次")
+        st.metric("最近活动", f"{stats['recent_activity']}次")
     
     # 加载历史数据
     history_data = load_ai_diagnosis_history()
