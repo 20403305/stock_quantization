@@ -375,7 +375,7 @@ class ModelClient:
 """
         
         return {
-            'success': True,
+            'success': False,
             'stock_code': stock_code,
             'analysis': demo_response,
             'usage': {'total_tokens': 0, 'prompt_tokens': 0, 'completion_tokens': 0},

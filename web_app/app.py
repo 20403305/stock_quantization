@@ -37,6 +37,522 @@ import hashlib
 import time
 import re
 
+# AI诊股历史记录功能相关函数
+def load_ai_diagnosis_history():
+    """加载AI诊股历史记录"""
+    try:
+        # 存储到data目录下的ai_diagnosis子目录
+        data_dir = Path(__file__).parent.parent / 'data' / 'ai_diagnosis'
+        data_dir.mkdir(exist_ok=True, parents=True)
+        file_path = data_dir / 'diagnosis_history.json'
+        
+        if file_path.exists():
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        else:
+            return {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save_ai_diagnosis_history(history_data):
+    """保存AI诊股历史记录"""
+    try:
+        data_dir = Path(__file__).parent.parent / 'data' / 'ai_diagnosis'
+        data_dir.mkdir(exist_ok=True, parents=True)
+        file_path = data_dir / 'diagnosis_history.json'
+        
+        # 优化存储格式
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(history_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"保存AI诊股历史记录失败: {e}")
+
+def add_ai_diagnosis_record(symbol, stock_name, model_results, model_platform, model_name, data_provider):
+    """添加AI诊股记录到历史"""
+    history_data = load_ai_diagnosis_history()
+    
+    if symbol not in history_data:
+        history_data[symbol] = []
+    
+    # 获取当前日期（用于去重判断）
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    
+    # 检查是否已有相同分析周期、模型平台和模型的记录
+    existing_records = history_data[symbol]
+    
+    # 查找当天相同配置的记录
+    duplicate_records = []
+    for i, record in enumerate(existing_records):
+        record_date = datetime.fromtimestamp(record['timestamp']).strftime("%Y-%m-%d")
+        if (record_date == current_date and 
+            record['model_platform'] == model_platform and 
+            record['model_name'] == model_name and 
+            record['analysis_summary']['data_period_days'] == model_results['data_period']['days']):
+            duplicate_records.append(i)
+    
+    # 删除当天相同配置的旧记录，只保留最新的一条
+    if duplicate_records:
+        # 保留最新的记录（时间戳最大的）
+        latest_timestamp = max([existing_records[i]['timestamp'] for i in duplicate_records])
+        
+        # 删除所有相同配置的记录
+        history_data[symbol] = [record for i, record in enumerate(existing_records) 
+                               if i not in duplicate_records or record['timestamp'] == latest_timestamp]
+    
+    # 判断分析是否成功
+    is_success = model_results['model_analysis']['success']
+    
+    # 创建新的诊股记录（保存完整分析报告）
+    new_record = {
+        "timestamp": datetime.now().timestamp(),
+        "query_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "symbol": symbol,
+        "stock_name": stock_name,
+        "model_platform": model_platform,
+        "model_name": model_name,
+        "data_provider": data_provider,
+        "analysis_summary": {
+            "success": is_success,
+            "full_analysis": model_results['model_analysis']['analysis'] if is_success else "分析失败",
+            "error_message": model_results['model_analysis'].get('error', '未知错误') if not is_success else None,
+            "is_demo": model_results['model_analysis'].get('is_demo', False),
+            "technical_indicators": {
+                "current_price": model_results['technical_indicators']['price']['current'] if model_results['technical_indicators'] else 0,
+                "rsi": model_results['technical_indicators']['momentum']['rsi'] if model_results['technical_indicators'] else 0,
+                "volume_ratio": model_results['technical_indicators']['volume']['ratio'] if model_results['technical_indicators'] else 0,
+                "support_level": model_results['technical_indicators']['price']['support'] if model_results['technical_indicators'] else 0,
+                "resistance_level": model_results['technical_indicators']['price']['resistance'] if model_results['technical_indicators'] else 0
+            },
+            "data_period_days": model_results['data_period']['days']
+        },
+        "full_analysis_available": is_success  # 标记完整分析数据是否可用
+    }
+    
+    # 限制每个股票最多保存10条记录
+    if len(history_data[symbol]) >= 10:
+        history_data[symbol] = history_data[symbol][-9:]  # 保留最新的9条
+    
+    history_data[symbol].append(new_record)
+    
+    # 按时间排序，最新的在前面
+    history_data[symbol].sort(key=lambda x: x['timestamp'], reverse=True)
+    
+    save_ai_diagnosis_history(history_data)
+
+def get_ai_diagnosis_statistics():
+    """获取AI诊股统计信息"""
+    history_data = load_ai_diagnosis_history()
+    
+    if not history_data:
+        return {
+            "total_analyses": 0,
+            "unique_stocks": 0,
+            "success_rate": 0,
+            "platform_usage": {},
+            "recent_activity": []
+        }
+    
+    total_analyses = 0
+    success_count = 0
+    platform_usage = defaultdict(int)
+    recent_activity = []
+    
+    for symbol, records in history_data.items():
+        total_analyses += len(records)
+        for record in records:
+            if record['analysis_summary']['success']:
+                success_count += 1
+            platform_usage[record['model_platform']] += 1
+            
+            # 收集最近的活动
+            recent_activity.append({
+                "symbol": symbol,
+                "stock_name": record['stock_name'],
+                "query_time": record['query_time'],
+                "platform": record['model_platform']
+            })
+    
+    # 按时间排序最近的10个活动
+    recent_activity.sort(key=lambda x: x['query_time'], reverse=True)
+    recent_activity = recent_activity[:10]
+    
+    return {
+        "total_analyses": total_analyses,
+        "unique_stocks": len(history_data),
+        "success_rate": success_count / total_analyses if total_analyses > 0 else 0,
+        "platform_usage": dict(platform_usage),
+        "recent_activity": recent_activity
+    }
+
+def _get_analysis_preview(record):
+    """获取分析预览内容"""
+    analysis_summary = record['analysis_summary']
+    
+    if analysis_summary['success']:
+        # 成功分析：显示分析内容
+        full_analysis = analysis_summary.get('full_analysis', analysis_summary.get('analysis_preview', '无分析内容'))
+        if len(full_analysis) > 100:
+            return full_analysis[:100] + "..."
+        return full_analysis
+    else:
+        # 失败分析：显示失败原因
+        if analysis_summary.get('is_demo', False):
+            return "演示模式分析（模型连接失败）"
+        else:
+            error_msg = analysis_summary.get('error_message', '分析失败')
+            return f"分析失败: {error_msg}"
+
+
+def display_ai_diagnosis_history():
+    """显示AI诊股历史记录"""
+    st.header("📋 AI诊股历史记录")
+    
+    # 获取统计信息
+    stats = get_ai_diagnosis_statistics()
+    
+    # 显示统计概览
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("总分析次数", stats["total_analyses"])
+    
+    with col2:
+        st.metric("分析股票数", stats["unique_stocks"])
+    
+    with col3:
+        st.metric("成功率", f"{stats['success_rate']:.1%}")
+    
+    with col4:
+        st.metric("最近活动", f"{len(stats['recent_activity'])}次")
+    
+    # 加载历史数据
+    history_data = load_ai_diagnosis_history()
+    
+    if not history_data:
+        st.info("暂无AI诊股历史记录")
+        return
+    
+    # 将历史数据转换为表格格式
+    table_data = []
+    for symbol, records in history_data.items():
+        for record in records:
+            table_data.append({
+                "股票代码": symbol,
+                "股票名称": record['stock_name'],
+                "分析时间": record['query_time'],
+                "模型平台": record['model_platform'],
+                "模型名称": record['model_name'],
+                "数据源": record['data_provider'],
+                "分析状态": "✅ 成功" if record['analysis_summary']['success'] else "❌ 失败",
+                "数据周期": record['analysis_summary']['data_period_days'],
+                "当前价格": record['analysis_summary']['technical_indicators']['current_price'],
+                "RSI指标": record['analysis_summary']['technical_indicators']['rsi'],
+                "成交量比率": record['analysis_summary']['technical_indicators']['volume_ratio'],
+                "分析预览": _get_analysis_preview(record),
+                "原始记录": record  # 保存原始记录用于详细显示
+            })
+    
+    if not table_data:
+        st.info("暂无AI诊股历史记录")
+        return
+    
+    # 创建DataFrame
+    df = pd.DataFrame(table_data)
+    
+    # 搜索和筛选功能
+    st.subheader("🔍 搜索和筛选")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        search_query = st.text_input("搜索股票代码或名称", placeholder="输入股票代码或名称...")
+    
+    with col2:
+        platform_filter = st.selectbox("筛选模型平台", ["全部"] + sorted(df['模型平台'].unique()))
+    
+    with col3:
+        status_filter = st.selectbox("筛选分析状态", ["全部", "✅ 成功", "❌ 失败"])
+    
+    # 应用筛选
+    filtered_df = df.copy()
+    
+    if search_query:
+        filtered_df = filtered_df[
+            filtered_df['股票代码'].str.contains(search_query, case=False, na=False) |
+            filtered_df['股票名称'].str.contains(search_query, case=False, na=False)
+        ]
+    
+    if platform_filter != "全部":
+        filtered_df = filtered_df[filtered_df['模型平台'] == platform_filter]
+    
+    if status_filter != "全部":
+        filtered_df = filtered_df[filtered_df['分析状态'] == status_filter]
+    
+    # 显示筛选结果统计
+    st.info(f"📊 找到 {len(filtered_df)} 条记录 (共 {len(df)} 条)")
+    
+    # 股票选择
+    st.subheader("📈 选择股票查看详细分析")
+    
+    # 获取唯一的股票列表
+    unique_stocks = filtered_df[['股票代码', '股票名称']].drop_duplicates()
+    
+    if len(unique_stocks) > 0:
+        # 创建股票选择器
+        stock_options = [f"{row['股票代码']} - {row['股票名称']}" for _, row in unique_stocks.iterrows()]
+        selected_stock = st.selectbox("选择股票", stock_options)
+        
+        # 提取选中的股票代码
+        selected_symbol = selected_stock.split(' - ')[0]
+        
+        # 显示该股票的所有分析记录
+        stock_records = filtered_df[filtered_df['股票代码'] == selected_symbol]
+        
+        if len(stock_records) > 0:
+            st.success(f"📊 找到 {len(stock_records)} 次 {selected_stock} 的分析记录")
+            
+            # 按时间排序
+            stock_records = stock_records.sort_values('分析时间', ascending=False)
+            
+            # 使用选项卡显示不同日期的分析报告
+            st.subheader("📅 分析记录时间线")
+            
+            # 创建选项卡
+            tab_labels = [f"{record['分析时间']}" for _, record in stock_records.iterrows()]
+            tabs = st.tabs(tab_labels)
+            
+            for i, (tab, (_, record)) in enumerate(zip(tabs, stock_records.iterrows())):
+                with tab:
+                    # 显示报告状态标识
+                    col1, col2 = st.columns([3, 2])
+                    
+                    with col1:
+                        status_color = "green" if record['分析状态'] == "✅ 成功" else "red"
+                        st.markdown(f"<h3 style='color: {status_color};'>{record['分析状态']}</h3>", unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.write(f"**模型平台:** {record['模型平台']}")
+                        st.write(f"**数据源:** {record['数据源']}")
+                        st.write(f"**模型名称:** {record['模型名称']}")
+                    
+                    st.markdown("---")
+                    
+                    # 技术指标展示
+                    st.subheader("📈 技术指标详情")
+                    
+                    if record['分析状态'] == "✅ 成功":
+                        # 技术指标卡片
+                        tech_col1, tech_col2, tech_col3 = st.columns(3)
+                        
+                        with tech_col1:
+                            price_color = "green" if record['当前价格'] > 0 else "red"
+                            st.markdown(f"<h4 style='color: {price_color};'>💰 当前价格: {record['当前价格']:.2f}</h4>", unsafe_allow_html=True)
+                        
+                        with tech_col2:
+                            rsi_value = record['RSI指标']
+                            if rsi_value > 70:
+                                rsi_color = "red"
+                                rsi_status = "超买"
+                            elif rsi_value < 30:
+                                rsi_color = "green"
+                                rsi_status = "超卖"
+                            else:
+                                rsi_color = "orange"
+                                rsi_status = "正常"
+                            st.markdown(f"<h4 style='color: {rsi_color};'>📊 RSI: {rsi_value:.1f} ({rsi_status})</h4>", unsafe_allow_html=True)
+                        
+                        with tech_col3:
+                            volume_ratio = record['成交量比率']
+                            if volume_ratio > 1.2:
+                                volume_color = "green"
+                                volume_status = "放量"
+                            elif volume_ratio < 0.8:
+                                volume_color = "red"
+                                volume_status = "缩量"
+                            else:
+                                volume_color = "orange"
+                                volume_status = "正常"
+                            st.markdown(f"<h4 style='color: {volume_color};'>📈 成交量: {volume_ratio:.2f} ({volume_status})</h4>", unsafe_allow_html=True)
+                        
+                        # 技术指标图表
+                        st.subheader("📊 技术指标可视化")
+                        
+                        # 创建技术指标雷达图
+                        indicators = ['价格', 'RSI', '成交量']
+                        values = [min(record['当前价格'] / 100, 1), record['RSI指标'] / 100, min(record['成交量比率'], 2) / 2]
+                        
+                        fig = go.Figure(data=go.Scatterpolar(
+                            r=values,
+                            theta=indicators,
+                            fill='toself',
+                            name=f"技术指标 - {record['分析时间']}"
+                        ))
+                        
+                        fig.update_layout(
+                            polar=dict(
+                                radialaxis=dict(
+                                    visible=True,
+                                    range=[0, 1]
+                                )),
+                            showlegend=False,
+                            title=f"技术指标雷达图 - {record['分析时间']}"
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # AI分析报告
+                        st.subheader("🤖 AI分析报告")
+                        
+                        # 创建报告容器
+                        report_container = st.container()
+                        with report_container:
+                            # 显示详细分析报告
+                            st.subheader("📋 详细分析报告")
+                            
+                            # 获取完整的分析报告内容（兼容新旧格式）
+                            analysis_summary = record['原始记录']['analysis_summary']
+                            
+                            if analysis_summary['success']:
+                                # 成功分析：显示完整分析内容
+                                full_analysis = analysis_summary.get('full_analysis', analysis_summary.get('analysis_preview', '无分析内容'))
+                                if full_analysis and full_analysis != "分析失败":
+                                    st.markdown("#### 分析内容:")
+                                    st.write(full_analysis)
+                                else:
+                                    st.warning("⚠️ 该次分析没有生成详细报告内容")
+                            else:
+                                # 失败分析：显示失败信息和可能的演示内容
+                                st.error("❌ 模型分析失败")
+                                
+                                if analysis_summary.get('is_demo', False):
+                                    # 演示模式：显示演示内容
+                                    st.info("💡 当前处于演示模式（模型连接失败）")
+                                    
+                                    # 尝试获取演示分析内容
+                                    demo_analysis = analysis_summary.get('full_analysis', '演示模式分析内容不可用')
+                                    if demo_analysis and demo_analysis != "分析失败":
+                                        st.markdown("#### 演示分析内容:")
+                                        st.write(demo_analysis)
+                                    else:
+                                        st.info("""
+                                        **演示模式分析报告：**
+                                        
+                                        由于模型服务连接失败，系统已自动切换到演示模式。
+                                        
+                                        **当前状态：**
+                                        - 📊 技术指标数据正常
+                                        - 🤖 AI模型服务暂时不可用
+                                        - 💡 显示演示分析内容
+                                        
+                                        **建议操作：**
+                                        - 检查网络连接
+                                        - 验证模型服务配置
+                                        - 稍后重试AI分析功能
+                                        """)
+                                else:
+                                    # 普通失败：显示错误信息
+                                    error_msg = analysis_summary.get('error_message', '未知错误')
+                                    st.error(f"**错误信息:** {error_msg}")
+                                    st.info("💡 分析失败可能的原因：")
+                                    st.write("• 模型服务连接失败")
+                                    st.write("• 数据获取异常")
+                                    st.write("• 网络连接问题")
+                                    st.write("• 模型处理超时")
+                            
+                            # 技术指标概览
+                            st.subheader("📊 技术指标概览")
+                            
+                            tech_col1, tech_col2, tech_col3, tech_col4 = st.columns(4)
+                            
+                            with tech_col1:
+                                st.metric(
+                                    label="当前价格",
+                                    value=f"{record['当前价格']:.2f}",
+                                    delta="上涨" if record['当前价格'] > 0 else "下跌"
+                                )
+                            
+                            with tech_col2:
+                                rsi_status = "超买" if record['RSI指标'] > 70 else "超卖" if record['RSI指标'] < 30 else "正常"
+                                st.metric(
+                                    label="RSI指标",
+                                    value=f"{record['RSI指标']:.1f}",
+                                    delta=rsi_status
+                                )
+                            
+                            with tech_col3:
+                                volume_status = "放量" if record['成交量比率'] > 1.2 else "缩量" if record['成交量比率'] < 0.8 else "正常"
+                                st.metric(
+                                    label="成交量比率",
+                                    value=f"{record['成交量比率']:.2f}",
+                                    delta=volume_status
+                                )
+                            
+                            with tech_col4:
+                                st.metric(
+                                    label="数据周期",
+                                    value=f"{record['数据周期']}天"
+                                )
+                            
+                            # 交易建议（与AI诊股模块保持一致）
+                            st.subheader("💡 交易建议")
+                            
+                            # 获取技术指标数据
+                            tech_indicators = record['原始记录']['analysis_summary']['technical_indicators']
+                            
+                            # 处理向后兼容：如果历史记录中没有支撑位和压力位数据，使用默认值
+                            support_level = tech_indicators.get('support_level', 0)
+                            resistance_level = tech_indicators.get('resistance_level', 0)
+                            
+                            # 显示与AI诊股模块一致的关键价位分析（使用实际技术指标数据）
+                            support_display = f"{support_level:.2f}" if support_level > 0 else "建议关注近期低点作为支撑参考"
+                            resistance_display = f"{resistance_level:.2f}" if resistance_level > 0 else "建议关注近期高点作为压力参考"
+                            
+                            st.info(f"""
+                            **关键价位分析:**
+                            - 支撑位: {support_display}
+                            - 压力位: {resistance_display}
+                            - 当前价位: {tech_indicators['current_price']:.2f}
+                            
+                            **建议操作:** 请结合AI分析报告和技术指标进行决策
+                            """)
+                    else:
+                        st.error("❌ 该次分析失败，无法显示详细报告")
+                        st.info("💡 分析失败可能的原因：")
+                        st.write("• 模型服务连接失败")
+                        st.write("• 数据获取异常")
+                        st.write("• 网络连接问题")
+                        st.write("• 模型处理超时")
+            
+            # 显示所有记录的表格视图
+            st.subheader("📋 所有记录表格视图")
+            
+            # 准备表格数据（排除原始记录列）
+            table_view_df = stock_records.drop(columns=['原始记录', '分析预览']).copy()
+            
+            # 格式化数值列
+            table_view_df['当前价格'] = table_view_df['当前价格'].apply(lambda x: f"{x:.2f}")
+            table_view_df['RSI指标'] = table_view_df['RSI指标'].apply(lambda x: f"{x:.1f}")
+            table_view_df['成交量比率'] = table_view_df['成交量比率'].apply(lambda x: f"{x:.2f}")
+            
+            st.dataframe(table_view_df, use_container_width=True, height=400)
+        else:
+            st.warning("⚠️ 未找到该股票的分析记录")
+    else:
+        st.warning("⚠️ 未找到符合条件的分析记录")
+    
+    # 数据导出功能
+    st.subheader("📊 数据导出")
+    
+    if st.button("📥 导出历史记录", type="primary"):
+        # 导出为CSV格式
+        export_df = df.drop(columns=['原始记录', '分析预览']).copy()
+        csv = export_df.to_csv(index=False, encoding='utf-8-sig')
+        st.download_button(
+            label="📥 下载CSV文件",
+            data=csv,
+            file_name=f"ai_diagnosis_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+
 def load_recent_stocks_config():
     """加载近期关注模块配置（从环境变量）"""
     try:
@@ -1645,7 +2161,7 @@ def main():
         st.subheader("功能模块")
         function_module = st.radio(
             "选择分析功能",
-            ["历史数据", "回测分析", "AI诊股", "基本信息", "逐笔交易", "近期关注", "投资笔记"],
+            ["历史数据", "回测分析", "AI诊股", "AI诊股历史", "基本信息", "逐笔交易", "近期关注", "投资笔记"],
             help="选择不同的分析功能模块"
         )
         
@@ -1890,6 +2406,10 @@ def main():
             # 投资笔记模块：选择时立即运行，无需按钮
             show_notes = True
             st.info("📝 正在显示投资笔记...")
+        elif function_module == "AI诊股历史":
+            # AI诊股历史记录模块：选择时立即运行，无需按钮
+            show_ai_history = True
+            st.info("📋 正在显示AI诊股历史记录...")
     
     # 主内容区域
     # 确保所有变量都已定义
@@ -1897,6 +2417,8 @@ def main():
         run_history = False
     if 'run_backtest' not in locals():
         run_backtest = False
+    if 'show_ai_history' not in locals():
+        show_ai_history = False
     if 'run_model_only' not in locals():
         run_model_only = False
     if 'show_intraday' not in locals():
@@ -1922,7 +2444,7 @@ def main():
                 display_investment_notes(symbol, stock_name, data_provider)
         else:
             display_investment_notes(symbol, stock_name, data_provider)
-    elif run_history or run_backtest or run_model_only or show_intraday or show_basic_info or show_recent:
+    elif run_history or run_backtest or run_model_only or show_intraday or show_basic_info or show_recent or show_ai_history:
         # 确保变量已定义
         if 'symbol' not in locals():
             symbol = "600519"  # 默认股票代码
@@ -2005,13 +2527,31 @@ def main():
                             selected_model
                         )
                         
+                        # 添加股票名称到模型结果中
+                        model_results['stock_name'] = stock_name
+                        
                         if model_results['model_analysis']['success']:
                             st.success("✅ AI模型分析完成")
-                            # 添加股票名称到模型结果中
-                            model_results['stock_name'] = stock_name
                             display_model_analysis(model_results)
                         else:
                             st.error(f"❌ 模型分析失败: {model_results['model_analysis'].get('error', '未知错误')}")
+                        
+                        # 无论成功还是失败，都保存AI诊股历史记录
+                        try:
+                            add_ai_diagnosis_record(
+                                symbol, 
+                                stock_name, 
+                                model_results, 
+                                model_platform, 
+                                selected_model, 
+                                data_provider
+                            )
+                            if model_results['model_analysis']['success']:
+                                st.info("📝 AI诊股记录已保存到历史")
+                            else:
+                                st.info("📝 AI诊股失败记录已保存到历史")
+                        except Exception as e:
+                            st.warning(f"⚠️ 保存历史记录失败: {e}")
                     except Exception as e:
                         st.error(f"❌ 模型分析异常: {e}")
                 
@@ -2040,6 +2580,11 @@ def main():
             if show_recent:
                 display_recent_stocks(data_provider)
                 return  # 近期关注显示完成后直接返回
+            
+            # AI诊股历史记录模块
+            if show_ai_history:
+                display_ai_diagnosis_history()
+                return  # AI诊股历史记录显示完成后直接返回
     
     else:
         # 默认显示
