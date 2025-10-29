@@ -40,6 +40,9 @@ import re
 # AI诊股历史记录功能相关函数
 from src.diagnosis_history_manager import get_history_manager
 
+# RSSHub资讯模块
+from web_app.rsshub_module import display_rsshub_news
+
 # 获取历史记录管理器实例
 history_manager = get_history_manager()
 
@@ -2108,7 +2111,7 @@ def main():
         st.subheader("功能模块")
         function_module = st.radio(
             "选择分析功能",
-            ["历史数据", "回测分析", "AI诊股", "AI诊股历史", "基本信息", "逐笔交易", "近期关注", "投资笔记"],
+            ["历史数据", "回测分析", "AI诊股", "AI诊股历史", "基本信息", "逐笔交易", "近期关注", "投资笔记", "RSSHub资讯"],
             help="选择不同的分析功能模块"
         )
         
@@ -2295,6 +2298,17 @@ def main():
             model_platform = "local"
             selected_model = "deepseek-r1:7b"
         
+        # RSSHub资讯模块参数
+        elif function_module == "RSSHub资讯":
+            # 设置默认值
+            start_date = datetime.now() - timedelta(days=365)
+            end_date = datetime.now()
+            strategy_name = "移动平均策略"
+            strategy_params = {}
+            enable_model_analysis = False
+            model_platform = "local"
+            selected_model = "deepseek-r1:7b"
+        
         # 基本信息和逐笔交易不需要额外参数
         else:
             # 设置默认值
@@ -2357,6 +2371,10 @@ def main():
             # AI诊股历史记录模块：选择时立即运行，无需按钮
             show_ai_history = True
             st.info("📋 正在显示AI诊股历史记录...")
+        elif function_module == "RSSHub资讯":
+            # RSSHub资讯模块：选择时立即运行，无需按钮
+            show_rsshub = True
+            st.info("📰 正在加载RSSHub资讯...")
     
     # 主内容区域
     # 确保所有变量都已定义
@@ -2376,6 +2394,8 @@ def main():
         show_recent = False
     if 'show_notes' not in locals():
         show_notes = False
+    if 'show_rsshub' not in locals():
+        show_rsshub = False
     
     # 投资笔记模块显示
     if show_notes:
@@ -2391,6 +2411,9 @@ def main():
                 display_investment_notes(symbol, stock_name, data_provider)
         else:
             display_investment_notes(symbol, stock_name, data_provider)
+    elif show_rsshub:
+        # RSSHub资讯模块显示
+        display_rsshub_news()
     elif run_history or run_backtest or run_model_only or show_intraday or show_basic_info or show_recent or show_ai_history:
         # 确保变量已定义
         if 'symbol' not in locals():
