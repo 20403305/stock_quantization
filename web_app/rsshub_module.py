@@ -454,7 +454,7 @@ def display_unified_search():
                 
             else:
                 # 获取所有新闻（不限制数量，后续统一处理）
-                all_news = news_manager.get_all_news(limit=200)  # 获取足够多的数据进行后续筛选
+                all_news = news_manager.get_all_news(limit=15000)  # 增加限制数量以匹配统计功能
                 
                 if not all_news:
                     st.warning("⚠️ 未获取到新闻数据，请检查RSSHub连接")

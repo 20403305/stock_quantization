@@ -12,6 +12,58 @@ default_sources:
 
 # 可选的新闻源配置
 optional_sources:
+  - name: "中国新闻网"
+    routes:
+      - route: "chinanews"
+        category: "中国新闻网"
+  - name: "商业-封面新闻"
+    routes:
+      - route: "thecover/channel/4"
+        category: "商业-封面新闻"
+  - name: "深圳本地宝焦点资讯"
+    routes:
+      - route: "bendibao/news/sz"
+        category: "深圳本地宝焦点资讯"
+  - name: "澎湃新闻-首页头条"
+    routes:
+      - route: "thepaper/featured"
+        category: "澎湃新闻-首页头条"
+  - name: "CCTV新闻联播"
+    routes:
+      - route: "cctv/xwlb"
+        category: "CCTV新闻联播"
+  - name: "极客日报"
+    routes:
+      - route: "csdn/blog/csdngeeknews"
+        category: "极客日报"
+  - name: "Artificial-intelligence"
+    routes:
+      - route: "topic/artificial-intelligence/feed/"
+        category: "Artificial-intelligence"
+  - name: "财经频道"
+    routes:
+      - route: "rss/finance.xml"
+        category: "财经频道"
+  - name: "TechWeb每日热点"
+    routes:
+      - route: "rss/hotnews"
+        category: "TechWeb每日热点"
+  - name: "每日环球视野"
+    routes:
+      - route: "idaily/today"
+        category: "每日环球视野"
+  - name: "TheBlockBeats-快讯"
+    routes:
+      - route: "theblockbeats/newsflash/0"
+        category: "TheBlockBeats-快讯"
+  - name: "7x24小时快讯"
+    routes:
+      - route: "fx678/kx"
+        category: "7x24小时快讯"
+  - name: "财富中文网"
+    routes:
+      - route: "fortunechina"
+        category: "财富中文网"
   - name: "百度热搜"
     routes:
       - route: "baidu/top"
@@ -67,3 +119,16 @@ enabled_sources:
   - "今日热门"
   - "格隆汇快讯"
   - "百度热搜"
+  - "财富中文网"
+  - "7x24小时快讯"
+  - "TheBlockBeats-快讯"
+  - "每日环球视野"
+  # - "TechWeb每日热点"
+  # - "财经频道"
+  # - "Artificial-intelligence"
+  - "极客日报"
+  - "CCTV新闻联播"
+  - "澎湃新闻-首页头条"
+  - "深圳本地宝焦点资讯"
+  - "商业-封面新闻"
+  - "中国新闻网"

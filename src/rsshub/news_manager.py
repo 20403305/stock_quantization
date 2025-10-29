@@ -61,19 +61,81 @@ class NewsManager:
                 if cache_file.is_file():
                     try:
                         with open(cache_file, 'r', encoding='utf-8') as f:
-                            cache_data = json.load(f)
+                            content = f.read()
+                        
+                        # 尝试解析JSON
+                        cache_data = json.loads(content)
                         
                         # 检查缓存是否过期（30天）
                         if 'cache_time' in cache_data:
                             cache_time = datetime.fromisoformat(cache_data['cache_time'])
                             if (datetime.now() - cache_time).total_seconds() < 30 * 24 * 3600:
                                 source_name = cache_file.stem
-                                self.cached_news[source_name] = cache_data.get('data', [])
-                                logger.info(f"加载缓存新闻: {source_name} - {len(self.cached_news[source_name])} 条")
+                                
+                                # 验证数据格式
+                                news_data = cache_data.get('data', [])
+                                if isinstance(news_data, list):
+                                    self.cached_news[source_name] = news_data
+                                    logger.info(f"加载缓存新闻: {source_name} - {len(self.cached_news[source_name])} 条")
+                                else:
+                                    logger.warning(f"缓存文件格式错误 {cache_file}: data字段不是列表")
+                                    # 创建空的缓存数据
+                                    self.cached_news[source_name] = []
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"缓存文件JSON格式错误 {cache_file}: {e}")
+                        # 修复损坏的缓存文件
+                        self._repair_corrupted_cache(cache_file)
                     except Exception as e:
                         logger.warning(f"加载缓存文件失败 {cache_file}: {e}")
         except Exception as e:
             logger.warning(f"加载缓存新闻失败: {e}")
+    
+    def _serialize_news_data(self, news_list: List[Dict]) -> List[Dict]:
+        """序列化新闻数据，确保可以JSON序列化"""
+        serialized_news = []
+        
+        for news in news_list:
+            serialized_news_item = {}
+            for key, value in news.items():
+                # 处理datetime对象，转换为字符串
+                if isinstance(value, datetime):
+                    serialized_news_item[key] = value.isoformat()
+                # 处理timedelta对象，转换为秒数
+                elif isinstance(value, timedelta):
+                    serialized_news_item[key] = value.total_seconds()
+                # 其他类型直接复制
+                else:
+                    serialized_news_item[key] = value
+            serialized_news.append(serialized_news_item)
+        
+        return serialized_news
+    
+    def _repair_corrupted_cache(self, cache_file: Path):
+        """修复损坏的缓存文件"""
+        try:
+            logger.info(f"正在修复损坏的缓存文件: {cache_file}")
+            
+            # 备份原文件
+            backup_file = cache_file.with_suffix('.json.bak')
+            if cache_file.exists():
+                if not backup_file.exists():
+                    cache_file.rename(backup_file)
+                else:
+                    cache_file.unlink()
+            
+            # 创建新的空缓存文件
+            new_data = {
+                "cache_time": datetime.now().isoformat(),
+                "data": []
+            }
+            
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(new_data, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"缓存文件修复完成: {cache_file}")
+            
+        except Exception as e:
+            logger.error(f"修复缓存文件失败 {cache_file}: {e}")
     
     def _update_cache(self, fresh_news: List[Dict]):
         """更新缓存数据"""
@@ -114,10 +176,10 @@ class NewsManager:
                 # 限制每个源的缓存数量（最多50条）
                 combined_news = combined_news[:50]
                 
-                # 保存缓存
+                # 保存缓存 - 确保数据可序列化
                 cache_data = {
                     "cache_time": datetime.now().isoformat(),
-                    "data": combined_news
+                    "data": self._serialize_news_data(combined_news)
                 }
                 
                 with open(cache_file, 'w', encoding='utf-8') as f:
