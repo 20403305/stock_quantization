@@ -15,75 +15,75 @@ optional_sources:
   - name: "中国新闻网"
     routes:
       - route: "chinanews"
-        category: "中国新闻网"
+        category: "国内要闻"
   - name: "商业-封面新闻"
     routes:
       - route: "thecover/channel/4"
-        category: "商业-封面新闻"
+        category: "商业资讯"
   - name: "深圳本地宝焦点资讯"
     routes:
       - route: "bendibao/news/sz"
-        category: "深圳本地宝焦点资讯"
+        category: "深圳本地"
   - name: "澎湃新闻-首页头条"
     routes:
       - route: "thepaper/featured"
-        category: "澎湃新闻-首页头条"
+        category: "头条新闻"
   - name: "CCTV新闻联播"
     routes:
       - route: "cctv/xwlb"
-        category: "CCTV新闻联播"
+        category: "时政要闻"
   - name: "极客日报"
     routes:
       - route: "csdn/blog/csdngeeknews"
-        category: "极客日报"
+        category: "科技资讯"
   - name: "Artificial-intelligence"
     routes:
       - route: "topic/artificial-intelligence/feed/"
-        category: "Artificial-intelligence"
+        category: "人工智能"
   - name: "财经频道"
     routes:
       - route: "rss/finance.xml"
-        category: "财经频道"
+        category: "财经快讯"
   - name: "TechWeb每日热点"
     routes:
       - route: "rss/hotnews"
-        category: "TechWeb每日热点"
+        category: "科技热点"
   - name: "每日环球视野"
     routes:
       - route: "idaily/today"
-        category: "每日环球视野"
+        category: "国际新闻"
   - name: "TheBlockBeats-快讯"
     routes:
       - route: "theblockbeats/newsflash/0"
-        category: "TheBlockBeats-快讯"
+        category: "区块链快讯"
   - name: "7x24小时快讯"
     routes:
       - route: "fx678/kx"
-        category: "7x24小时快讯"
+        category: "外汇快讯"
   - name: "财富中文网"
     routes:
       - route: "fortunechina"
-        category: "财富中文网"
+        category: "财富资讯"
   - name: "百度热搜"
     routes:
       - route: "baidu/top"
-        category: "百度热搜"
+        category: "热搜榜单"
   - name: "格隆汇快讯"
     routes:
       - route: "gelonghui/live"
-        category: "7x24小时市场快讯"
+        category: "市场快讯"
   - name: "今日热门"
     routes:
       - route: "coolapk/hot"
-        category: "要闻"
+        category: "热门资讯"
   - name: "第一财经"
     routes:
       - route: "yicai/latest"
-        category: "AI资讯"
+        category: "财经动态"
   - name: "AI新闻资讯"
     routes:
       - route: "aibase/news"
-        category: "AI资讯"
+        category: "AI动态"
   - name: "雪球"
     routes:
       - route: "xueqiu/timeline/a"
@@ -101,7 +101,7 @@ optional_sources:
       - route: "eastmoney/gg"
         category: "公告新闻"
       - route: "eastmoney/kx"
-        category: "快讯"
+        category: "快讯新闻"
   - name: "财新"
     routes:
       - route: "caixin/finance"

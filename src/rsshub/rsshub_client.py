@@ -39,7 +39,7 @@ class RSSHubClient:
         # 缓存配置
         self.cache_dir = Path(__file__).parent.parent.parent / 'data' / 'rsshub_cache'
         self.cache_dir.mkdir(exist_ok=True, parents=True)
-        self.cache_expiry = 30 * 24 * 3600  # 缓存过期时间（30天，单位：秒）
+        self.cache_expiry = 600  # 缓存过期时间（10分钟，单位：秒）
     
     def test_connection(self) -> bool:
         """测试与RSSHub服务器的连接"""
@@ -50,13 +50,14 @@ class RSSHubClient:
             logger.warning(f"RSSHub连接测试失败: {e}")
             return False
     
-    def get_feed(self, route: str, params: Optional[Dict] = None) -> Optional[Dict]:
+    def get_feed(self, route: str, params: Optional[Dict] = None, force_refresh: bool = False) -> Optional[Dict]:
         """
         获取RSS订阅源数据
         
         Args:
             route: RSSHub路由路径
             params: 查询参数
+            force_refresh: 是否强制刷新，绕过缓存
             
         Returns:
             解析后的Feed数据字典，失败返回None
@@ -65,11 +66,14 @@ class RSSHubClient:
             # 构建URL
             url = f"{self.base_url}/{route.lstrip('/')}"
             
-            # 检查缓存
+            # 生成缓存键（无论是否强制刷新都需要）
             cache_key = self._get_cache_key(route, params)
-            cached_data = self._get_cached_data(cache_key)
-            if cached_data:
-                return cached_data
+            
+            # 检查缓存（除非强制刷新）
+            if not force_refresh:
+                cached_data = self._get_cached_data(cache_key)
+                if cached_data:
+                    return cached_data
             
             # 发送请求
             response = self.session.get(url, params=params, timeout=10)
