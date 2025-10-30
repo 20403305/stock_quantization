@@ -350,6 +350,9 @@ def display_news_list(news_list: List[Dict]):
     
     # 为每条新闻创建可展开的卡片
     for i, news in enumerate(news_list):
+        # 确保每条新闻有唯一ID
+        if "_id" not in news:
+            news["_id"] = f"{news.get('source','')}_{news.get('title','')}_{news.get('published','')}"
         display_news_expander(news, i)
 
 def display_unified_search():
@@ -594,7 +597,7 @@ def display_news_expander(news: Dict, index: int):
         if clean_summary and clean_summary != "无摘要":
             st.markdown("**📝 摘要:**")
             # 使用文本框显示完整内容，支持滚动
-            st.text_area("摘要内容", clean_summary, height=150, key=f"summary_{index}")
+            st.text_area("摘要内容", clean_summary, height=150, key=f"summary_{news.get('_id', index)}")
         
         # 显示相关性分数（如果存在）
         if relevance > 0:
