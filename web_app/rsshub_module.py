@@ -17,35 +17,64 @@ def display_rsshub_news():
     """显示近期资讯主界面"""
     st.header("📰 近期资讯中心")
     
-    # 测试连接状态（不显示地址）
-    connection_status = test_rsshub_connection()
+    # 初始化连接状态为未知
+    connection_status = {"connected": None}
     
-    # 显示连接状态
-    if connection_status["connected"]:
-        st.success("✅ 资讯服务连接正常")
+    # 显示数据状态（先加载缓存数据）
+    news_manager = get_news_manager()
+    cached_news = news_manager.get_all_news(limit=1)  # 只检查是否有缓存数据
+    
+    if cached_news:
+        st.success("✅ 系统已加载本地缓存数据")
+        st.info("💡 如需获取最新资讯请点击下方按钮")
     else:
-        st.error("❌ 资讯服务连接失败")
-        st.info("""
-        **连接问题解决方案：**
-        - 确保资讯服务正常运行
-        - 检查网络连接
-        - 如需修改配置，请在环境变量中设置 `RSSHUB_BASE_URL`
-        """)
+        st.warning("⚠️ 暂无缓存数据，请点击下方按钮获取最新资讯")
+    
+    # 手动刷新按钮
+    st.subheader("🔄 手动获取最新资讯")
+    
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        if st.button("📥 拉取最新资讯", type="primary", use_container_width=True):
+            with st.spinner("正在测试连接并拉取最新资讯..."):
+                # 在手动获取时测试连接状态
+                connection_status = test_rsshub_connection()
+                
+                if connection_status["connected"]:
+                    st.success("✅ 资讯服务连接正常")
+                    
+                    # 获取最新数据
+                    news_manager = get_news_manager()
+                    refresh_result = news_manager.refresh_news_data()
+                    
+                    if refresh_result["success"]:
+                        st.success(refresh_result["message"])
+                        # 刷新页面以显示最新数据
+                        st.rerun()
+                    else:
+                        st.error(refresh_result["message"])
+                else:
+                    st.error("❌ 资讯服务连接失败")
+                    st.info("""
+                    **连接问题解决方案：**
+                    - 确保资讯服务正常运行
+                    - 检查网络连接
+                    - 如需修改配置，请在环境变量中设置 `RSSHUB_BASE_URL`
+                    """)
+    
+    with col2:
+        st.info("💡 点击按钮将测试服务连接并获取最新资讯，系统将自动更新缓存数据")
     
     # 功能选择
     st.subheader("🔍 资讯功能选择")
     
-    # 如果连接失败，禁用搜索功能，只显示统计
-    if connection_status["connected"]:
-        news_function = st.radio(
-            "选择资讯功能",
-            ["🔍 统一搜索", "📊 资讯统计"],
-            horizontal=True,
-            help="选择不同的资讯查看方式"
-        )
-    else:
-        st.warning("⚠️ 由于资讯服务连接失败，搜索功能已禁用，仅提供资讯统计功能")
-        news_function = "📊 资讯统计"
+    # 默认启用所有功能，因为现在先加载缓存数据
+    news_function = st.radio(
+        "选择资讯功能",
+        ["🔍 统一搜索", "📊 资讯统计"],
+        horizontal=True,
+        help="选择不同的资讯查看方式"
+    )
     
     # 根据选择显示不同功能
     if news_function == "🔍 统一搜索":
@@ -388,7 +417,7 @@ def display_unified_search():
         )
     
     with col2:
-        news_limit = st.slider("数量", 10, 100, 30, help="显示新闻数量", key="news_limit_slider")
+        news_limit = st.slider("数量", 10, 300, 100, help="显示新闻数量", key="news_limit_slider")
     
     with col3:
         days_back = st.slider("天数", 1, 30, 7, help="时间范围（天）", key="days_back_slider")
@@ -460,7 +489,7 @@ def display_unified_search():
                 all_news = news_manager.get_all_news(limit=15000)  # 增加限制数量以匹配统计功能
                 
                 if not all_news:
-                    st.warning("⚠️ 未获取到新闻数据，请检查RSSHub连接")
+                    st.warning("⚠️ 暂无新闻数据，请先获取最新资讯")
                     st.session_state.search_performed = True
                     st.session_state.search_results = []
                     return

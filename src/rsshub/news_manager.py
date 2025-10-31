@@ -252,7 +252,7 @@ class NewsManager:
     
     def get_all_news(self, limit: int = 100, use_cache: bool = True) -> List[Dict]:
         """
-        获取所有新闻源的最新新闻
+        获取所有新闻源的最新新闻（仅使用缓存数据）
         
         Args:
             limit: 限制返回的新闻数量
@@ -264,7 +264,7 @@ class NewsManager:
         all_news = []
         seen_titles = set()  # 用于去重的标题集合
         
-        # 首先返回缓存数据（如果可用）
+        # 只返回缓存数据，不进行动态请求
         cache_news_count = 0
         if use_cache and self.cached_news:
             for source_name, cached_entries in self.cached_news.items():
@@ -283,45 +283,40 @@ class NewsManager:
             
             logger.info(f"已加载本地缓存数据: {cache_news_count} 条")
         
-        # 检查缓存数据的新鲜度，决定是否需要动态请求
-        need_fresh_data = False
+        # 按发布时间排序
+        all_news.sort(key=lambda x: self._parse_published_date(x.get("published")), reverse=True)
         
-        # 如果缓存数据为空，或者缓存时间超过10分钟，需要获取最新数据
-        if not self.cached_news:
-            need_fresh_data = True
-            logger.info("缓存数据为空，开始动态请求最新数据")
-        else:
-            # 检查缓存文件的时间戳
-            cache_dir = self.data_dir
-            if cache_dir.exists():
-                cache_files = list(cache_dir.glob("*.json"))
-                if cache_files:
-                    latest_cache_time = max(cache_files, key=lambda x: x.stat().st_mtime).stat().st_mtime
-                    current_time = time.time()
-                    # 如果缓存超过10分钟，需要更新（缩短时间以便测试）
-                    if current_time - latest_cache_time > 600:
-                        need_fresh_data = True
-                        logger.info("缓存数据已超过10分钟，开始动态请求最新数据")
-                else:
-                    need_fresh_data = True
-                    logger.info("没有找到缓存文件，开始动态请求最新数据")
-            else:
-                need_fresh_data = True
-                logger.info("缓存目录不存在，开始动态请求最新数据")
+        # 如果指定了限制，则返回限制数量的结果
+        if limit is not None:
+            return all_news[:limit]
+        return all_news
+    
+    def refresh_news_data(self) -> Dict[str, any]:
+        """
+        手动刷新新闻数据，获取最新资讯
         
-        # 只有在需要时才进行动态请求，避免频繁请求影响用户体验
-        if need_fresh_data:
+        Returns:
+            刷新结果，包含成功状态和获取的新闻数量
+        """
+        result = {
+            "success": False,
+            "message": "",
+            "new_news_count": 0,
+            "total_news_count": 0
+        }
+        
+        try:
             # 先测试RSSHub连接是否正常
             connection_ok = False
             try:
                 # 测试连接：尝试获取一个简单的feed
                 test_feed = self.client.get_feed("/test")
                 connection_ok = True
-                logger.info("RSSHub连接正常，开始动态请求最新数据")
+                logger.info("RSSHub连接正常，开始手动获取最新数据")
             except Exception as e:
-                logger.warning(f"RSSHub连接失败: {e}，将直接使用缓存数据")
-                # 设置连接失败标志，避免后续重复尝试
-                self.connection_failed = True
+                logger.warning(f"RSSHub连接失败: {e}")
+                result["message"] = f"RSSHub连接失败: {e}"
+                return result
             
             # 只有当连接正常时才进行动态请求
             if connection_ok:
@@ -330,7 +325,7 @@ class NewsManager:
                     fresh_news = []
                     fresh_seen_titles = set()
                     
-                    logger.info("开始动态请求最新新闻数据...")
+                    logger.info("开始手动获取最新新闻数据...")
                     
                     for source_name, source_config in self.news_sources.items():
                         for route, category in source_config["routes"]:
@@ -343,7 +338,7 @@ class NewsManager:
                                         title = entry.get("title", "").strip()
                                         title_key = title.lower()
                                         
-                                        # 只在新数据内部去重，不与缓存数据去重
+                                        # 只在新数据内部去重
                                         if title_key in fresh_seen_titles:
                                             continue
                                         fresh_seen_titles.add(title_key)
@@ -359,41 +354,46 @@ class NewsManager:
                     
                     if fresh_news:
                         # 计算实际新增的新闻数量（去重后）
-                        fresh_seen_titles = set()
-                        actual_new_news = []
+                        existing_titles = set()
+                        for source_name, cached_entries in self.cached_news.items():
+                            for entry in cached_entries:
+                                title = entry.get("title", "").strip().lower()
+                                existing_titles.add(title)
                         
+                        actual_new_news = []
                         for news in fresh_news:
                             title = news.get("title", "").strip().lower()
-                            if title not in seen_titles:  # 与已加载的缓存数据去重
-                                fresh_seen_titles.add(title)
+                            if title not in existing_titles:  # 与已存在的缓存数据去重
                                 actual_new_news.append(news)
                         
-                        logger.info(f"动态请求完成，共获取 {len(fresh_news)} 条最新新闻")
+                        logger.info(f"手动请求完成，共获取 {len(fresh_news)} 条最新新闻")
                         logger.info(f"实际新增新闻: {len(actual_new_news)} 条（去重后）")
-                        logger.info(f"总计新闻数据: {cache_news_count + len(actual_new_news)} 条（缓存 + 新增）")
-                        
-                        # 合并缓存数据和最新数据
-                        all_news.extend(actual_new_news)
                         
                         # 更新缓存
                         self._update_cache(fresh_news)
+                        
+                        # 重新加载缓存数据
+                        self._load_cached_news()
+                        
+                        result["success"] = True
+                        result["message"] = f"成功获取 {len(fresh_news)} 条最新新闻，其中 {len(actual_new_news)} 条为新内容"
+                        result["new_news_count"] = len(actual_new_news)
+                        result["total_news_count"] = len(fresh_news)
+                        
                     else:
-                        logger.info("动态请求未获取到新数据")
+                        result["message"] = "未获取到新数据"
+                        logger.info("手动请求未获取到新数据")
                     
                 except Exception as e:
                     logger.warning(f"获取最新新闻失败: {e}")
-            else:
-                logger.info("RSSHub连接失败，直接使用缓存数据")
-        else:
-            logger.info("缓存数据仍然新鲜，直接使用缓存数据")
-        
-        # 按发布时间排序
-        all_news.sort(key=lambda x: self._parse_published_date(x.get("published")), reverse=True)
-        
-        # 如果指定了限制，则返回限制数量的结果
-        if limit is not None:
-            return all_news[:limit]
-        return all_news
+                    result["message"] = f"获取最新新闻失败: {e}"
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"手动刷新新闻数据失败: {e}")
+            result["message"] = f"刷新失败: {e}"
+            return result
     
     def get_stock_related_news(self, symbol: str, days: int = 7, limit: int = 50) -> List[Dict]:
         """
